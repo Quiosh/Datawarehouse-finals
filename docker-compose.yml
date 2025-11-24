@@ -1,0 +1,77 @@
+version: "3.8"
+
+name: shopzada-data-platform
+
+networks:
+  shopzada-net:
+    driver: bridge
+
+volumes:
+  postgres_data:
+  kestra_data:
+
+services:
+  # -------------------------------------------------------
+  # 1. THE DATA WAREHOUSE (Target System)
+  # -------------------------------------------------------
+  shopzada_dw:
+    image: postgres:16-alpine
+    container_name: shopzada_dw
+    restart: always
+    environment:
+      POSTGRES_USER: shopzada_admin
+      POSTGRES_PASSWORD: secure_password_123
+      POSTGRES_DB: shopzada_warehouse
+    volumes:
+      # Persist data so you don't lose your Star Schema on restart
+      - postgres_data:/var/lib/postgresql/data
+      # Optional: Mount a local folder to initialize DB scripts
+      - ./init_scripts:/docker-entrypoint-initdb.d
+    ports:
+      - "5432:5432"
+    networks:
+      - shopzada-net
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U shopzada_admin -d shopzada_warehouse"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # -------------------------------------------------------
+  # 2. ORCHESTRATION & INGESTION ENGINE
+  # -------------------------------------------------------
+  kestra:
+    image: kestra/kestra:latest
+    container_name: kestra_orchestrator
+    restart: always
+    environment:
+      KESTRA_CONFIGURATION: |
+        kestra:
+          server:
+            basic-auth:
+              enabled: false # Disabled for local dev convenience
+    # Mount your local python scripts/datasets so Kestra can see them
+    volumes:
+      - ./etl_scripts:/app/etl_scripts
+      - ./raw_data:/app/raw_data
+      - kestra_data:/app/storage
+      - /var/run/docker.sock:/var/run/docker.sock # Allows running Docker-in-Docker for isolated Python tasks
+    ports:
+      - "8080:8080" # The Web UI
+    networks:
+      - shopzada-net
+    depends_on:
+      shopzada_dw:
+        condition: service_healthy
+
+  # -------------------------------------------------------
+  # 3. UTILITY (Database Viewer)
+  # -------------------------------------------------------
+  adminer:
+    image: adminer
+    container_name: shopzada_ui
+    restart: always
+    ports:
+      - "8081:8080"
+    networks:
+      - shopzada-net
