@@ -1,0 +1,26 @@
+datasources:
+  postgres:
+    url: jdbc:postgresql://shopzada_dw:5432/shopzada_warehouse
+    driver-class-name: org.postgresql.Driver
+    username: shopzada_admin
+    password: secure_password_123
+kestra:
+  server:
+    basic-auth:
+      username: "admin@kestra.io" # must be a valid email address
+      password: kestra
+      # Do not authenticate these URLs (some Micronaut defaults are open by default for security reasons)
+      open-urls:
+        - "/api/v1/main/executions/webhook/"
+  repository:
+    type: postgres
+  storage:
+    type: local
+    local:
+      base-path: "/app/storage"
+  queue:
+    type: postgres
+  tasks:
+    tmp-dir:
+      path: "/tmp/kestra-wd/tmp"
+  url: "http://0.0.0.0:8080/"

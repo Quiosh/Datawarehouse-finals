@@ -1,5 +1,3 @@
-version: "3.8"
-
 name: shopzada-data-platform
 
 networks:
@@ -7,8 +5,8 @@ networks:
     driver: bridge
 
 volumes:
-  postgres_data:
-  kestra_data:
+  shopzada_postgres_data:
+  shopzada_kestra_data:
 
 services:
   # -------------------------------------------------------
@@ -24,9 +22,9 @@ services:
       POSTGRES_DB: shopzada_warehouse
     volumes:
       # Persist data so you don't lose your Star Schema on restart
-      - postgres_data:/var/lib/postgresql/data
+      - shopzada_postgres_data:/var/lib/postgresql/data
       # Optional: Mount a local folder to initialize DB scripts
-      - ./init_scripts:/docker-entrypoint-initdb.d
+      # - ./init_scripts:/docker-entrypoint-initdb.d
     ports:
       - "5432:5432"
     networks:
@@ -44,17 +42,20 @@ services:
     image: kestra/kestra:latest
     container_name: kestra_orchestrator
     restart: always
-    environment:
-      KESTRA_CONFIGURATION: |
-        kestra:
-          server:
-            basic-auth:
-              enabled: false # Disabled for local dev convenience
+    # environment:
+    #   KESTRA_CONFIGURATION: |
+    #     kestra:
+    #       server:
+    #         basic-auth:
+    #           enabled: false # Disabled for local dev convenience
     # Mount your local python scripts/datasets so Kestra can see them
+    command: server standalone --worker-thread=4 --config /etc/config/application.yaml
     volumes:
       - ./etl_scripts:/app/etl_scripts
       - ./raw_data:/app/raw_data
-      - kestra_data:/app/storage
+      - ./tmp/kestra-wd:/tmp/kestra-wd
+      - shopzada_kestra_data:/app/storage
+      - ./kestra.yml:/etc/config/application.yaml
       - /var/run/docker.sock:/var/run/docker.sock # Allows running Docker-in-Docker for isolated Python tasks
     ports:
       - "8080:8080" # The Web UI
