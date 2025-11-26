@@ -7,11 +7,7 @@ datasources:
 kestra:
   server:
     basic-auth:
-      username: "admin@kestra.io" # must be a valid email address
-      password: kestra
-      # Do not authenticate these URLs (some Micronaut defaults are open by default for security reasons)
-      open-urls:
-        - "/api/v1/main/executions/webhook/"
+      enabled: true
   repository:
     type: postgres
   storage:
