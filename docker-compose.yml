@@ -49,16 +49,17 @@ services:
     #         basic-auth:
     #           enabled: false # Disabled for local dev convenience
     # Mount your local python scripts/datasets so Kestra can see them
+    # user: "1000:1000"
+    user: "root"
     command: server standalone --worker-thread=4 --config /etc/config/application.yaml
     volumes:
-      - ./etl_scripts:/app/etl_scripts
-      - ./raw_data:/app/raw_data
       - ./tmp/kestra-wd:/tmp/kestra-wd
       - shopzada_kestra_data:/app/storage
       - ./kestra.yml:/etc/config/application.yaml
       - /var/run/docker.sock:/var/run/docker.sock # Allows running Docker-in-Docker for isolated Python tasks
     ports:
       - "8080:8080" # The Web UI
+      - "8081:8081"
     networks:
       - shopzada-net
     depends_on:
@@ -73,6 +74,6 @@ services:
     container_name: shopzada_ui
     restart: always
     ports:
-      - "8081:8080"
+      - "8082:8080"
     networks:
       - shopzada-net
