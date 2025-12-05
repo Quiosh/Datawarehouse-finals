@@ -24,8 +24,8 @@ services:
     networks:
       - windmill-internal
     environment:
-      POSTGRES_PASSWORD: changeme
-      POSTGRES_DB: windmill
+      POSTGRES_PASSWORD: shopzada
+      POSTGRES_DB: shopzada
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U postgres"]
       interval: 10s
