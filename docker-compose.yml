@@ -204,6 +204,7 @@ services:
       # To change the exposed port, simply change 80:80 to <desired_port>:80. No other changes needed
       - 80:80
       - 25:25
+      - 5432:5432
       # - 443:443 # Uncomment to enable HTTPS handling by Caddy
     networks:
       - windmill-internal
