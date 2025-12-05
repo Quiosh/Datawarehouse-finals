@@ -4,7 +4,8 @@
 			proxy {
 				to windmill_server:2525
 			}
-		},
+		}
+
     :5432 {
       proxy {
         to db:5432
