@@ -84,6 +84,7 @@ services:
       - /var/run/docker.sock:/var/run/docker.sock
       - worker_dependency_cache:/tmp/windmill/cache
       - worker_logs:/tmp/windmill/logs
+      - ./datasets:/datasets
 
     logging: *default-logging
 
@@ -119,6 +120,7 @@ services:
         condition: service_healthy
     volumes:
       - worker_logs:/tmp/windmill/logs
+      - ./datasets:/datasets
     logging: *default-logging
   # This worker is specialized for reports or scraping jobs. It is assigned the "reports" worker group which has an init script that installs chromium and can be targeted by using the "chromium" worker tag.
   # windmill_worker_reports:
