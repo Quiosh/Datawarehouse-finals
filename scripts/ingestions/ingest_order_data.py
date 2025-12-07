@@ -1,5 +1,6 @@
 import io
 from io import StringIO
+import re  # Added for regex cleaning
 
 import requests
 import pandas as pd
@@ -87,14 +88,12 @@ def _load_html(url: str) -> pd.DataFrame:
 def _standardize_order_df(df: pd.DataFrame) -> pd.DataFrame:
     """
     Make sure we end up with columns:
-      order_id, user_id, estimated_arrival (TEXT), transaction_date (TIMESTAMP)
+      order_id, user_id, estimated_arrival (INTEGER), transaction_date (TIMESTAMP)
     """
-    # Drop junk columns like "Unnamed: 0"
-    junk_cols = [c for c in df.columns if str(c).startswith("Unnamed:")]
-    if junk_cols:
-        df = df.drop(columns=junk_cols)
+    # 1. Drop junk columns like "Unnamed: 0"
+    df = df.loc[:, ~df.columns.str.contains('^Unnamed:', case=False)]
 
-    # Normalize possible header variants
+    # 2. Normalize headers
     rename_map = {}
     for col in df.columns:
         lc = str(col).strip().lower()
@@ -117,10 +116,13 @@ def _standardize_order_df(df: pd.DataFrame) -> pd.DataFrame:
     # Keep only required columns, in order
     df = df[required]
 
-    # Make sure estimated_arrival is TEXT-like
-    df["estimated_arrival"] = df["estimated_arrival"].astype(str)
+    # 3. Clean estimated_arrival
+    #    "15days" -> 15 (Integer)
+    #    Regex strips everything that is NOT a digit
+    df["estimated_arrival"] = df["estimated_arrival"].astype(str).str.replace(r'\D', '', regex=True)
+    df["estimated_arrival"] = pd.to_numeric(df["estimated_arrival"], errors="coerce")
 
-    # Parse transaction_date as timestamp
+    # 4. Parse transaction_date as timestamp
     df["transaction_date"] = pd.to_datetime(df["transaction_date"], errors="coerce")
 
     return df
@@ -144,7 +146,11 @@ def main():
         sort=False,
     )
 
-    # 3) Connect to Postgres
+    # 3) Safety Deduplication
+    #    Remove rows that might overlap between files
+    df_all = df_all.drop_duplicates()
+
+    # 4) Connect to Postgres
     conn = psycopg2.connect(
         host="db",
         port=5432,
@@ -156,18 +162,20 @@ def main():
 
     table_name = "stg_order_data"
 
-    # 4) Drop & recreate staging table
+    # 5) Drop & recreate staging table
     cur.execute(f"DROP TABLE IF EXISTS {table_name};")
+    
+    # Changed estimated_arrival to INTEGER
     cur.execute(f"""
         CREATE TABLE {table_name} (
             order_id           TEXT,
             user_id            TEXT,
-            estimated_arrival  TEXT,
+            estimated_arrival  INTEGER,
             transaction_date   TIMESTAMP
         );
     """)
 
-    # 5) Bulk insert using COPY
+    # 6) Bulk insert using COPY
     buffer = StringIO()
     df_all.to_csv(buffer, index=False, header=False)
     buffer.seek(0)
@@ -193,11 +201,7 @@ def main():
         "table": table_name,
         "rows_loaded": len(df_all),
         "sources": [
-            URL_2020_H1,
-            URL_2020_H2,
-            URL_2021,
-            URL_2022,
-            URL_2023_H1,
-            URL_2023_H2,
+            URL_2020_H1, URL_2020_H2, URL_2021,
+            URL_2022, URL_2023_H1, URL_2023_H2,
         ],
     }

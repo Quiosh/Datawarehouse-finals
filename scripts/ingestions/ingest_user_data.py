@@ -13,37 +13,51 @@ FILE_URL = (
 def main():
     # 1) Download JSON from GitHub
     resp = requests.get(FILE_URL, timeout=30)
-    resp.raise_for_status()  # raise if 404/500
+    resp.raise_for_status()
 
-    # 2) Parse JSON (column-oriented: {column: {idx: value}})
+    # 2) Parse JSON
+    #    The JSON is column-oriented. We reconstruct the DataFrame.
     raw = json.loads(resp.text)
     cols = {col: pd.Series(mapping) for col, mapping in raw.items()}
     df = pd.DataFrame(cols)
 
-    # Parse dates so Postgres can store proper timestamps/dates
+    # ==========================================
+    # 🧹 DATA CLEANING STEPS
+    # ==========================================
+
+    # 1. Standardize Headers
+    #    "User_id" -> "user_id"
+    df.columns = df.columns.str.lower().str.strip()
+
+    # 2. Drop Junk Columns (Unnamed: 11, etc.)
+    df = df.loc[:, ~df.columns.str.contains('^unnamed', case=False)]
+
+    # 3. Parse Dates
     if "creation_date" in df.columns:
         df["creation_date"] = pd.to_datetime(df["creation_date"], errors="coerce")
     if "birthdate" in df.columns:
         df["birthdate"] = pd.to_datetime(df["birthdate"], errors="coerce")
 
+    # 4. Trim Whitespace from Text Columns
+    df = df.apply(lambda x: x.str.strip() if x.dtype == "object" else x)
+
+    # 5. Safety Deduplication
+    #    We remove ONLY exact row duplicates.
+    #    We DO NOT drop duplicates on 'user_id' alone because there are valid ID collisions.
+    df = df.drop_duplicates()
+
+    # ==========================================
+
+    # Verify Columns
     required_cols = [
-        "user_id",
-        "creation_date",
-        "name",
-        "street",
-        "state",
-        "city",
-        "country",
-        "birthdate",
-        "gender",
-        "device_address",
-        "user_type",
+        "user_id", "creation_date", "name", "street", "state", 
+        "city", "country", "birthdate", "gender", "device_address", "user_type"
     ]
     missing = [c for c in required_cols if c not in df.columns]
     if missing:
         raise ValueError(f"Missing expected columns in JSON: {missing}")
 
-    # 3) Connect directly to Postgres container "db"
+    # 3) Connect directly to Postgres
     conn = psycopg2.connect(
         host="db",
         port=5432,
@@ -53,20 +67,21 @@ def main():
     )
     cur = conn.cursor()
 
-    # 4) Create / reset staging table
+    # 4) Create / Reset Staging Table
+    #    Note: No PRIMARY KEY on user_id to allow collisions
     cur.execute("""
         CREATE TABLE IF NOT EXISTS stg_user_data (
-            user_id        TEXT,
-            creation_date  TIMESTAMP,
-            name           TEXT,
-            street         TEXT,
-            state          TEXT,
-            city           TEXT,
-            country        TEXT,
-            birthdate      DATE,
-            gender         TEXT,
-            device_address TEXT,
-            user_type      TEXT
+            user_id         TEXT,
+            creation_date   TIMESTAMP,
+            name            TEXT,
+            street          TEXT,
+            state           TEXT,
+            city            TEXT,
+            country         TEXT,
+            birthdate       DATE,
+            gender          TEXT,
+            device_address  TEXT,
+            user_type       TEXT
         );
         TRUNCATE TABLE stg_user_data;
     """)
@@ -103,4 +118,5 @@ def main():
     return {
         "rows_loaded": len(df),
         "source_url": FILE_URL,
+        "columns_found": list(df.columns)
     }

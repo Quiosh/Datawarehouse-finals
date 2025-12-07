@@ -1,9 +1,9 @@
+import io
 import requests
 import pandas as pd
 import psycopg2
 from io import StringIO
-import lxml  # ensure lxml is available for read_html
-
+import lxml
 
 # 🔗 Raw URL for order_delays.html
 FILE_URL = (
@@ -11,35 +11,40 @@ FILE_URL = (
     "datasets/Operations%20Department/order_delays.html"
 )
 
-
 def main():
     # 1) Download HTML from GitHub
     resp = requests.get(FILE_URL, timeout=60)
     resp.raise_for_status()
-    html_str = resp.text
 
-    # 2) Parse first table from HTML
-    tables = pd.read_html(html_str)
+    # 2) Parse HTML Table
+    #    We use read_html because the source is an HTML file
+    tables = pd.read_html(resp.text)
     if not tables:
         raise ValueError("No tables found in order_delays HTML")
-
+    
     df = tables[0]
 
-    # Drop junk index column if present
-    if "Unnamed: 0" in df.columns:
-        df = df.drop(columns=["Unnamed: 0"])
+    # ==========================================
+    # 🧹 DATA CLEANING STEPS
+    # ==========================================
 
-    # 3) Normalize column names
-    rename_map = {}
-    for col in df.columns:
-        lc = str(col).strip().lower()
-        if lc == "order_id":
-            rename_map[col] = "order_id"
-        elif lc.replace(" ", "_") == "delay_in_days":
-            rename_map[col] = "delay_in_days"
+    # 1. Standardize Headers
+    #    - Lowercase: "Order ID" -> "order id"
+    #    - Replace spaces with underscores: "order id" -> "order_id"
+    #      (This handles "Delay in Days" -> "delay_in_days")
+    df.columns = df.columns.str.lower().str.strip().str.replace(' ', '_')
 
-    df = df.rename(columns=rename_map)
+    # 2. Remove Junk Columns
+    #    Removes "Unnamed: 2", "Unnamed: 0", etc.
+    df = df.loc[:, ~df.columns.str.contains('^unnamed')]
 
+    # 3. Clean "delay_in_days"
+    #    Ensure it is numeric (integers). Coerce errors to NaN.
+    if "delay_in_days" in df.columns:
+        df["delay_in_days"] = pd.to_numeric(df["delay_in_days"], errors="coerce")
+
+
+    # Verify Columns
     required_cols = ["order_id", "delay_in_days"]
     missing = [c for c in required_cols if c not in df.columns]
     if missing:
@@ -47,10 +52,7 @@ def main():
             f"Missing expected columns {missing}. Got {list(df.columns)}"
         )
 
-    # 4) Cast delay_in_days to integer-like
-    df["delay_in_days"] = pd.to_numeric(df["delay_in_days"], errors="coerce").astype("Int64")
-
-    # 5) Connect to Postgres
+    # 3) Connect to Postgres
     conn = psycopg2.connect(
         host="db",
         port=5432,
@@ -62,8 +64,9 @@ def main():
 
     table_name = "stg_order_delays"
 
-    # 6) Drop & recreate staging table
+    # 4) Drop & Recreate Staging Table
     cur.execute(f"DROP TABLE IF EXISTS {table_name};")
+    
     cur.execute(f"""
         CREATE TABLE {table_name} (
             order_id       TEXT,
@@ -71,7 +74,7 @@ def main():
         );
     """)
 
-    # 7) Bulk insert using COPY
+    # 5) Bulk insert using COPY
     buffer = StringIO()
     df[required_cols].to_csv(buffer, index=False, header=False)
     buffer.seek(0)
@@ -95,4 +98,5 @@ def main():
         "table": table_name,
         "rows_loaded": len(df),
         "source_url": FILE_URL,
+        "columns_found": list(df.columns)
     }

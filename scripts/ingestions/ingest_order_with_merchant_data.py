@@ -1,50 +1,30 @@
 import io
-import re
-from io import StringIO
-
 import requests
 import pandas as pd
 import psycopg2
-import pyarrow  # needed so pandas can read parquet via pyarrow
+import pyarrow  # Required for read_parquet
+from io import StringIO
+from io import BytesIO
 
-
-# 🔑 Raw URLs from GitHub
+# 🔑 TODO: Replace these with the EXACT Raw URLs from GitHub ("Raw" button on each file)
 URL_ORDER_MERCHANT_1 = (
-    "https://raw.githubusercontent.com/Quiosh/Datawarehouse-finals/main/"
-    "datasets/Enterprise%20Department/order_with_merchant_data1.parquet"
+    "https://raw.githubusercontent.com/Quiosh/Datawarehouse-finals/main/datasets/Enterprise%20Department/order_with_merchant_data1.parquet"
 )
 
 URL_ORDER_MERCHANT_2 = (
-    "https://raw.githubusercontent.com/Quiosh/Datawarehouse-finals/main/"
-    "datasets/Enterprise%20Department/order_with_merchant_data2.parquet"
+    "https://raw.githubusercontent.com/Quiosh/Datawarehouse-finals/main/datasets/Enterprise%20Department/order_with_merchant_data2.parquet"
 )
 
 URL_ORDER_MERCHANT_3 = (
-    "https://raw.githubusercontent.com/Quiosh/Datawarehouse-finals/main/"
-    "datasets/Enterprise%20Department/order_with_merchant_data3.csv"
+    "https://raw.githubusercontent.com/Quiosh/Datawarehouse-finals/main/datasets/Enterprise%20Department/order_with_merchant_data3.csv"
 )
-
-
-def _sanitize_column(name: str) -> str:
-    """
-    Turn any column name into a safe Postgres identifier:
-    - lower case
-    - spaces and weird chars -> _
-    - prefix with _ if it starts with a digit
-    """
-    col = str(name).strip().lower()
-    col = re.sub(r"[^a-z0-9_]", "_", col)
-    if re.match(r"^[0-9]", col):
-        col = "_" + col
-    if col == "":
-        col = "col"
-    return col
 
 
 def _load_parquet_from_github(url: str) -> pd.DataFrame:
     resp = requests.get(url, timeout=60)
     resp.raise_for_status()
-    return pd.read_parquet(io.BytesIO(resp.content))
+    # Use BytesIO for binary parquet data
+    return pd.read_parquet(BytesIO(resp.content))
 
 
 def _load_csv_from_github(url: str) -> pd.DataFrame:
@@ -53,26 +33,54 @@ def _load_csv_from_github(url: str) -> pd.DataFrame:
     return pd.read_csv(io.StringIO(resp.text))
 
 
+def clean_dataframe(df: pd.DataFrame) -> pd.DataFrame:
+    """
+    Standardizes column names and removes junk columns.
+    """
+    # 1. Standardize headers: lowercase and strip spaces
+    df.columns = df.columns.str.lower().str.strip()
+
+    # 2. Select ONLY the required columns
+    #    This automatically drops 'Unnamed: 0', 'Unnamed__0', etc.
+    expected_cols = ['order_id', 'merchant_id', 'staff_id']
+    
+    # Validation
+    missing = [c for c in expected_cols if c not in df.columns]
+    if missing:
+        raise ValueError(f"DataFrame missing expected columns: {missing}")
+        
+    # Return only clean columns
+    return df[expected_cols]
+
+
 def main():
-    # 1) Load all three datasets from GitHub
-    df1 = _load_parquet_from_github(URL_ORDER_MERCHANT_1)
-    df2 = _load_parquet_from_github(URL_ORDER_MERCHANT_2)
-    df3 = _load_csv_from_github(URL_ORDER_MERCHANT_3)
+    # 1) Load all three datasets
+    #    Note: 1 & 2 are Parquet, 3 is CSV
+    try:
+        # print("Loading DF1 (Parquet)...")
+        df1 = _load_parquet_from_github(URL_ORDER_MERCHANT_1)
+        
+        # print("Loading DF2 (Parquet)...")
+        df2 = _load_parquet_from_github(URL_ORDER_MERCHANT_2)
+        
+        # print("Loading DF3 (CSV)...")
+        df3 = _load_csv_from_github(URL_ORDER_MERCHANT_3)
+    except Exception as e:
+        raise RuntimeError(f"Failed to download files: {e}")
 
-    # 2) Combine into ONE big DataFrame (union of columns)
-    df_all = pd.concat([df1, df2, df3], ignore_index=True, sort=False)
+    # 2) Clean and Consolidate
+    #    Apply cleaning to each part
+    df1 = clean_dataframe(df1)
+    df2 = clean_dataframe(df2)
+    df3 = clean_dataframe(df3)
 
-    # 3) Drop any junk "Unnamed: 0" style columns
-    junk_cols = [c for c in df_all.columns if str(c).lower().startswith("unnamed")]
-    if junk_cols:
-        df_all = df_all.drop(columns=junk_cols)
+    #    Merge into one big DataFrame
+    df_final = pd.concat([df1, df2, df3], ignore_index=True)
+    
+    #    Safety: Remove any exact duplicates across the files
+    df_final = df_final.drop_duplicates()
 
-    # 4) Sanitize column names once for the combined DataFrame
-    original_cols = list(df_all.columns)
-    safe_cols = [_sanitize_column(c) for c in original_cols]
-    df_all.columns = safe_cols
-
-    # 5) Connect once to Postgres
+    # 3) Connect to Postgres
     conn = psycopg2.connect(
         host="db",
         port=5432,
@@ -82,38 +90,38 @@ def main():
     )
     cur = conn.cursor()
 
-    table_name = "stg_order_with_merchant_data"
-
-    # 6) Drop & recreate ONE staging table with all TEXT columns
-    cur.execute(f"DROP TABLE IF EXISTS {table_name};")
-
-    cols_sql = ",\n".join(f"{col} TEXT" for col in safe_cols)
-    create_sql = f"""
-        CREATE TABLE {table_name} (
-            {cols_sql}
+    # 4) Create Single Staging Table
+    #    We consolidate everything into 'stg_order_with_merchant_data'
+    cur.execute("DROP TABLE IF EXISTS stg_order_with_merchant_data;")
+    
+    cur.execute("""
+        CREATE TABLE stg_order_with_merchant_data (
+            order_id     TEXT,
+            merchant_id  TEXT,
+            staff_id     TEXT
         );
-    """
-    cur.execute(create_sql)
+    """)
 
-    # 7) Bulk insert everything using COPY
+    # 5) Bulk insert using COPY
     buffer = StringIO()
-    df_all.to_csv(buffer, index=False, header=False)
+    df_final.to_csv(buffer, index=False, header=False)
     buffer.seek(0)
 
-    copy_sql = f"""
-        COPY {table_name} ({", ".join(safe_cols)})
+    cur.copy_expert(
+        """
+        COPY stg_order_with_merchant_data (order_id, merchant_id, staff_id)
         FROM STDIN WITH (FORMAT csv)
-    """
-    cur.copy_expert(copy_sql, buffer)
+        """,
+        buffer,
+    )
 
     conn.commit()
     cur.close()
     conn.close()
 
     return {
-        "table": table_name,
-        "rows_loaded": len(df_all),
-        "columns": safe_cols,
-        "sources": [URL_ORDER_MERCHANT_1, URL_ORDER_MERCHANT_2, URL_ORDER_MERCHANT_3],
-        "dropped_unnamed_columns": junk_cols,
+        "status": "success",
+        "table": "stg_order_with_merchant_data",
+        "rows_loaded": len(df_final),
+        "source_urls": [URL_ORDER_MERCHANT_1, URL_ORDER_MERCHANT_2, URL_ORDER_MERCHANT_3]
     }

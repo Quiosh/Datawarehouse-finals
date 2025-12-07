@@ -5,65 +5,49 @@ import pandas as pd
 import psycopg2
 from io import StringIO
 
-# 🔑 Raw URL from GitHub
-FILE_URL = (
-    "https://raw.githubusercontent.com/Quiosh/Datawarehouse-finals/main/"
-    "datasets/Marketing%20Department/campaign_data.csv"
-)
-
-
-def _parse_discount(value):
-    """
-    Extract the numeric part of discount strings like:
-      '5%', '5 percent', '5pct', '10 PERCENT', etc.
-    Returns the number (e.g., 5.0) or None if no digits found.
-    """
-    if value is None:
-        return None
-    s = str(value).lower().strip()
-    m = re.search(r"(\d+(\.\d+)?)", s)
-    if not m:
-        return None
-    return float(m.group(1))
+# 🔑 Raw URL (This file is "dirty" and needs the cleaning logic below)
+FILE_URL = "https://raw.githubusercontent.com/Quiosh/Datawarehouse-finals/main/datasets/Marketing%20Department/campaign_data.csv"
 
 
 def main():
-    # 1) Download file from GitHub
+    # 1) Download CSV from GitHub
     resp = requests.get(FILE_URL, timeout=30)
     resp.raise_for_status()
 
-    # 2) Read as TSV (tab-separated), NOT comma-separated
-    df_raw = pd.read_csv(
-        io.StringIO(resp.text),
-        sep="\t",
-        engine="python"
-    )
+    # 2) Read Raw File
+    #    The GitHub file is technically a CSV, but all the data is stuffed 
+    #    into the first column, separated by tabs.
+    df_raw = pd.read_csv(io.StringIO(resp.text))
 
-    # Drop junk index columns like "Unnamed: 0"
-    junk_cols = [c for c in df_raw.columns if str(c).lower().startswith("unnamed")]
-    if junk_cols:
-        df_raw = df_raw.drop(columns=junk_cols)
+    # ==========================================
+    # 🧹 DATA CLEANING STEPS
+    # ==========================================
 
-    # Must have at least 4 columns now
-    if df_raw.shape[1] < 4:
-        raise ValueError(
-            f"Expected at least 4 columns in campaign_data.csv (TSV), "
-            f"got {df_raw.shape[1]}: {list(df_raw.columns)}"
-        )
+    # 1. Extract Hidden Data
+    #    Split the first column by Tab ('\t') to get the real data columns.
+    #    This creates columns: [Index, ID, Name, Description, Discount]
+    df = df_raw.iloc[:, 0].str.split('\t', expand=True)
 
-    # 3) Map by position:
-    # col0 -> campaign_id
-    # col1 -> campaign_name
-    # col2 -> campaign_description
-    # col3 -> discount (parsed)
-    discount_raw = df_raw.iloc[:, 3]
+    # 2. Drop Junk Index Column (Column 0)
+    #    The first extracted column is just row numbers (0, 1, 2...). We remove it.
+    if df.shape[1] >= 5:
+        df = df.drop(columns=[0])
 
-    df = pd.DataFrame({
-        "campaign_id":          df_raw.iloc[:, 0].astype(str),
-        "campaign_name":        df_raw.iloc[:, 1].astype(str),
-        "campaign_description": df_raw.iloc[:, 2].astype(str),
-        "discount":             discount_raw.apply(_parse_discount),
-    })
+    # 3. Assign Correct Headers
+    df.columns = ["campaign_id", "campaign_name", "campaign_description", "discount"]
+
+    # 4. Clean "discount" Column
+    #    Converts '1%', '10%%', '1pct' -> 1, 10, 1
+    #    Regex removes anything that is NOT a digit or dot.
+    df["discount"] = df["discount"].astype(str).str.replace(r'[^0-9.]', '', regex=True)
+    #    Safely convert to number (coercing errors to NaN)
+    df["discount"] = pd.to_numeric(df["discount"], errors='coerce')
+
+    # 5. Clean "campaign_description"
+    #    Removes the excessive triple-quotes ("""Text""") found in the raw data.
+    df["campaign_description"] = df["campaign_description"].astype(str).str.replace('"', '')
+
+    # ==========================================
 
     # 4) Connect to Postgres
     conn = psycopg2.connect(
@@ -75,30 +59,30 @@ def main():
     )
     cur = conn.cursor()
 
-    table_name = "stg_campaign_data"
-
-    # 5) Drop & recreate staging table
-    cur.execute(f"DROP TABLE IF EXISTS {table_name};")
-    cur.execute(f"""
-        CREATE TABLE {table_name} (
-            campaign_id            TEXT,
-            campaign_name          TEXT,
-            campaign_description   TEXT,
-            discount               NUMERIC
+    # 5) Recreate Staging Table
+    cur.execute("DROP TABLE IF EXISTS stg_campaign_data;")
+    
+    cur.execute("""
+        CREATE TABLE stg_campaign_data (
+            campaign_id           TEXT,
+            campaign_name         TEXT,
+            campaign_description  TEXT,
+            discount              NUMERIC
         );
     """)
 
     # 6) Bulk insert using COPY
     buffer = StringIO()
+    # Write to buffer as standard CSV (comma separated)
     df.to_csv(buffer, index=False, header=False)
     buffer.seek(0)
 
     cur.copy_expert(
-        f"""
-        COPY {table_name} (
-            campaign_id,
-            campaign_name,
-            campaign_description,
+        """
+        COPY stg_campaign_data (
+            campaign_id, 
+            campaign_name, 
+            campaign_description, 
             discount
         )
         FROM STDIN WITH (FORMAT csv)
@@ -112,6 +96,6 @@ def main():
 
     return {
         "rows_loaded": len(df),
-        "columns": ["campaign_id", "campaign_name", "campaign_description", "discount"],
         "source_url": FILE_URL,
+        "columns_cleaned": list(df.columns)
     }
