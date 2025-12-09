@@ -4,7 +4,7 @@ import pandas as pd
 import psycopg2
 from io import StringIO
 import lxml 
-import re # Added regex library
+import re 
 
 # 🔑 Replace with the EXACT Raw URL of staff_data.html from GitHub
 FILE_URL = (
@@ -34,26 +34,36 @@ def main():
     # 3. Trim whitespace
     df = df.apply(lambda x: x.str.strip() if x.dtype == "object" else x)
 
-    # 4. Safety Deduplication
-    df = df.drop_duplicates()
-
-    # 5. Parse Dates
+    # 4. Parse Dates
     if "creation_date" in df.columns:
         df["creation_date"] = pd.to_datetime(df["creation_date"], errors="coerce")
 
-    # 6. Clean Phone Numbers (NEW STEP)
-    #    Removes '(', ')', '.', and '-' to leave only digits
+    # 5. Clean Phone Numbers
     if "contact_number" in df.columns:
-        df["contact_number"] = df["contact_number"].astype(str).str.replace(r'[().-]', '', regex=True)
-        # Optional: If you want to strip the leading '1' from '15551234' to match others, 
-        # you can decide that here. For now, we just standardize to digits.
+        df["contact_number"] = df["contact_number"].astype(str).str.replace(r'\D', '', regex=True)
+
+    # ------------------------------------------
+    # 🚀 SOFT DEDUPLICATION LOGIC
+    # ------------------------------------------
+    
+    # A. Sort by Staff ID and Creation Date (Newest first)
+    df = df.sort_values(by=['staff_id', 'creation_date'], ascending=[True, False])
+
+    # B. Flag Duplicates
+    #    keep='first' preserves the newest record as False (Not duplicate)
+    df['possible_duplicate'] = df.duplicated(subset=['staff_id'], keep='first')
+
+    # C. Link to Master ID
+    df['possible_duplicate_of'] = None
+    df.loc[df['possible_duplicate'], 'possible_duplicate_of'] = df['staff_id']
 
     # ==========================================
 
     # Verify Columns
     required_cols = [
-        "staff_id", "name", "job_level", "street",
-        "state", "city", "country", "contact_number", "creation_date"
+        "staff_id", "name", "job_level", "street", "state", "city", 
+        "country", "contact_number", "creation_date", 
+        "possible_duplicate", "possible_duplicate_of"
     ]
     missing = [c for c in required_cols if c not in df.columns]
     if missing:
@@ -69,19 +79,23 @@ def main():
     )
     cur = conn.cursor()
 
+    # DROP TABLE fix
+    cur.execute("DROP TABLE IF EXISTS stg_staff_data;")
+
     cur.execute("""
-        CREATE TABLE IF NOT EXISTS stg_staff_data (
-            staff_id        TEXT,
-            name            TEXT,
-            job_level       TEXT,
-            street          TEXT,
-            state           TEXT,
-            city            TEXT,
-            country         TEXT,
-            contact_number  TEXT,
-            creation_date   TIMESTAMP
+        CREATE TABLE stg_staff_data (
+            staff_id              TEXT,
+            name                  TEXT,
+            job_level             TEXT,
+            street                TEXT,
+            state                 TEXT,
+            city                  TEXT,
+            country               TEXT,
+            contact_number        TEXT,
+            creation_date         TIMESTAMP,
+            possible_duplicate    BOOLEAN,
+            possible_duplicate_of TEXT
         );
-        TRUNCATE TABLE stg_staff_data;
     """)
 
     buffer = StringIO()
@@ -92,7 +106,8 @@ def main():
         """
         COPY stg_staff_data (
             staff_id, name, job_level, street, state, city, 
-            country, contact_number, creation_date
+            country, contact_number, creation_date,
+            possible_duplicate, possible_duplicate_of
         )
         FROM STDIN WITH (FORMAT csv)
         """,
@@ -105,5 +120,6 @@ def main():
 
     return {
         "rows_loaded": len(df),
+        "duplicates_flagged": int(df['possible_duplicate'].sum()),
         "source_url": FILE_URL
     }

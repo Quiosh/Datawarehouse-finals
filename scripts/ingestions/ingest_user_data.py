@@ -16,7 +16,6 @@ def main():
     resp.raise_for_status()
 
     # 2) Parse JSON
-    #    The JSON is column-oriented. We reconstruct the DataFrame.
     raw = json.loads(resp.text)
     cols = {col: pd.Series(mapping) for col, mapping in raw.items()}
     df = pd.DataFrame(cols)
@@ -26,10 +25,9 @@ def main():
     # ==========================================
 
     # 1. Standardize Headers
-    #    "User_id" -> "user_id"
     df.columns = df.columns.str.lower().str.strip()
 
-    # 2. Drop Junk Columns (Unnamed: 11, etc.)
+    # 2. Drop Junk Columns
     df = df.loc[:, ~df.columns.str.contains('^unnamed', case=False)]
 
     # 3. Parse Dates
@@ -38,20 +36,31 @@ def main():
     if "birthdate" in df.columns:
         df["birthdate"] = pd.to_datetime(df["birthdate"], errors="coerce")
 
-    # 4. Trim Whitespace from Text Columns
+    # 4. Trim Whitespace
     df = df.apply(lambda x: x.str.strip() if x.dtype == "object" else x)
 
-    # 5. Safety Deduplication
-    #    We remove ONLY exact row duplicates.
-    #    We DO NOT drop duplicates on 'user_id' alone because there are valid ID collisions.
-    df = df.drop_duplicates()
+    # ------------------------------------------
+    # 🚀 SOFT DEDUPLICATION LOGIC
+    # ------------------------------------------
+    
+    # A. Sort by User ID and Creation Date (Newest first)
+    df = df.sort_values(by=['user_id', 'creation_date'], ascending=[True, False])
+
+    # B. Flag Duplicates
+    #    keep='first' preserves the newest record as the Master.
+    df['possible_duplicate'] = df.duplicated(subset=['user_id'], keep='first')
+
+    # C. Link to Master ID
+    df['possible_duplicate_of'] = None
+    df.loc[df['possible_duplicate'], 'possible_duplicate_of'] = df['user_id']
 
     # ==========================================
 
     # Verify Columns
     required_cols = [
         "user_id", "creation_date", "name", "street", "state", 
-        "city", "country", "birthdate", "gender", "device_address", "user_type"
+        "city", "country", "birthdate", "gender", "device_address", "user_type",
+        "possible_duplicate", "possible_duplicate_of"
     ]
     missing = [c for c in required_cols if c not in df.columns]
     if missing:
@@ -67,23 +76,25 @@ def main():
     )
     cur = conn.cursor()
 
-    # 4) Create / Reset Staging Table
-    #    Note: No PRIMARY KEY on user_id to allow collisions
+    # 4) Drop & Recreate Staging Table (FIXED)
+    cur.execute("DROP TABLE IF EXISTS stg_user_data;")
+
     cur.execute("""
-        CREATE TABLE IF NOT EXISTS stg_user_data (
-            user_id         TEXT,
-            creation_date   TIMESTAMP,
-            name            TEXT,
-            street          TEXT,
-            state           TEXT,
-            city            TEXT,
-            country         TEXT,
-            birthdate       DATE,
-            gender          TEXT,
-            device_address  TEXT,
-            user_type       TEXT
+        CREATE TABLE stg_user_data (
+            user_id               TEXT,
+            creation_date         TIMESTAMP,
+            name                  TEXT,
+            street                TEXT,
+            state                 TEXT,
+            city                  TEXT,
+            country               TEXT,
+            birthdate             DATE,
+            gender                TEXT,
+            device_address        TEXT,
+            user_type             TEXT,
+            possible_duplicate    BOOLEAN,
+            possible_duplicate_of TEXT
         );
-        TRUNCATE TABLE stg_user_data;
     """)
 
     # 5) Bulk insert using COPY
@@ -94,17 +105,9 @@ def main():
     cur.copy_expert(
         """
         COPY stg_user_data (
-            user_id,
-            creation_date,
-            name,
-            street,
-            state,
-            city,
-            country,
-            birthdate,
-            gender,
-            device_address,
-            user_type
+            user_id, creation_date, name, street, state, city, country, 
+            birthdate, gender, device_address, user_type,
+            possible_duplicate, possible_duplicate_of
         )
         FROM STDIN WITH (FORMAT csv)
         """,
@@ -117,6 +120,6 @@ def main():
 
     return {
         "rows_loaded": len(df),
+        "duplicates_flagged": int(df['possible_duplicate'].sum()),
         "source_url": FILE_URL,
-        "columns_found": list(df.columns)
     }

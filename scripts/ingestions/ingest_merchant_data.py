@@ -4,7 +4,7 @@ import requests
 import pandas as pd
 import psycopg2
 from io import StringIO
-import lxml  # ensure lxml is available for read_html
+import lxml 
 
 # 🔑 Replace with the EXACT Raw URL for merchant_data.html from GitHub
 FILE_URL = (
@@ -18,7 +18,6 @@ def main():
     resp.raise_for_status()
 
     # 2) Parse HTML Table
-    #    We use read_html as the primary parser
     tables = pd.read_html(resp.text)
     if not tables:
         raise ValueError("No tables found in merchant_data HTML")
@@ -30,14 +29,12 @@ def main():
     # ==========================================
 
     # 1. Standardize Headers
-    #    "Merchant_id" -> "merchant_id"
     df.columns = df.columns.str.lower().str.strip()
 
-    # 2. Drop Junk Columns (Unnamed: 0, Unnamed: 8, etc.)
+    # 2. Drop Junk Columns
     df = df.loc[:, ~df.columns.str.contains('^unnamed', case=False)]
 
     # 3. Clean Contact Number
-    #    Remove non-digits: "(452) 170-5656" -> "4521705656"
     if "contact_number" in df.columns:
         df["contact_number"] = df["contact_number"].astype(str).str.replace(r'\D', '', regex=True)
 
@@ -45,18 +42,31 @@ def main():
     if "creation_date" in df.columns:
         df["creation_date"] = pd.to_datetime(df["creation_date"], errors="coerce")
 
-    # 5. Trim Whitespace from Text
+    # 5. Trim Whitespace
     df = df.apply(lambda x: x.str.strip() if x.dtype == "object" else x)
 
-    # 6. Safety Deduplication (Exact rows only)
-    df = df.drop_duplicates()
+    # ------------------------------------------
+    # 🚀 SOFT DEDUPLICATION LOGIC
+    # ------------------------------------------
+    
+    # A. Sort by Merchant ID and Creation Date (Newest first)
+    df = df.sort_values(by=['merchant_id', 'creation_date'], ascending=[True, False])
+
+    # B. Flag Duplicates
+    #    keep='first' preserves the newest record as the Master.
+    df['possible_duplicate'] = df.duplicated(subset=['merchant_id'], keep='first')
+
+    # C. Link to Master ID
+    df['possible_duplicate_of'] = None
+    df.loc[df['possible_duplicate'], 'possible_duplicate_of'] = df['merchant_id']
 
     # ==========================================
 
     # Expected columns verification
     required_cols = [
         "merchant_id", "creation_date", "name", "street", "state", 
-        "city", "country", "contact_number"
+        "city", "country", "contact_number", 
+        "possible_duplicate", "possible_duplicate_of"
     ]
     missing = [c for c in required_cols if c not in df.columns]
     if missing:
@@ -72,19 +82,22 @@ def main():
     )
     cur = conn.cursor()
 
-    # 4) Create / Reset Staging Table
+    # 4) Drop & Recreate Staging Table (FIXED)
+    cur.execute("DROP TABLE IF EXISTS stg_merchant_data;")
+
     cur.execute("""
-        CREATE TABLE IF NOT EXISTS stg_merchant_data (
-            merchant_id     TEXT,
-            creation_date   TIMESTAMP,
-            name            TEXT,
-            street          TEXT,
-            state           TEXT,
-            city            TEXT,
-            country         TEXT,
-            contact_number  TEXT
+        CREATE TABLE stg_merchant_data (
+            merchant_id           TEXT,
+            creation_date         TIMESTAMP,
+            name                  TEXT,
+            street                TEXT,
+            state                 TEXT,
+            city                  TEXT,
+            country               TEXT,
+            contact_number        TEXT,
+            possible_duplicate    BOOLEAN,
+            possible_duplicate_of TEXT
         );
-        TRUNCATE TABLE stg_merchant_data;
     """)
 
     # 5) Bulk insert using COPY
@@ -95,14 +108,8 @@ def main():
     cur.copy_expert(
         """
         COPY stg_merchant_data (
-            merchant_id,
-            creation_date,
-            name,
-            street,
-            state,
-            city,
-            country,
-            contact_number
+            merchant_id, creation_date, name, street, state, city, country, contact_number,
+            possible_duplicate, possible_duplicate_of
         )
         FROM STDIN WITH (FORMAT csv)
         """,
@@ -115,6 +122,6 @@ def main():
 
     return {
         "rows_loaded": len(df),
+        "duplicates_flagged": int(df['possible_duplicate'].sum()),
         "source_url": FILE_URL,
-        "columns_found": list(df.columns)
     }
