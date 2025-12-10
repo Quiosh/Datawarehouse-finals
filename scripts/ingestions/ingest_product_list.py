@@ -19,20 +19,46 @@ def main():
     # 2) Try reading as Excel, fall back to CSV if needed
     try:
         df = pd.read_excel(BytesIO(file_bytes), engine="openpyxl")
-    except Exception as e:
+    except Exception:
         try:
             df = pd.read_csv(BytesIO(file_bytes))
         except Exception as e2:
-            raise ValueError(
-                f"Failed to read file as Excel or CSV. "
-                f"Excel error: {e}, CSV error: {e2}"
-            )
+            raise ValueError(f"Failed to read file as Excel or CSV: {e2}")
 
-    # Drop junk index column
-    if "Unnamed: 0" in df.columns:
-        df = df.drop(columns=["Unnamed: 0"])
+    # ==========================================
+    # 🧹 DATA CLEANING STEPS
+    # ==========================================
 
-    # Expected columns from your file
+    # 1. Standardize Headers
+    #    "Product_id" -> "product_id"
+    df.columns = df.columns.str.lower().str.strip()
+
+    # 2. Drop Junk Columns
+    df = df.loc[:, ~df.columns.str.contains('^unnamed', case=False)]
+
+    # 3. Clean Product Type (Standardization)
+    #    - Convert to lowercase
+    #    - Replace underscores with spaces ("readymade_breakfast" -> "readymade breakfast")
+    #    - Strip whitespace
+    if "product_type" in df.columns:
+        df["product_type"] = df["product_type"].astype(str).str.lower().str.replace('_', ' ').str.strip()
+
+    # 4. Clean Product Name (NEW STEP)
+    #    - Convert to lowercase (Standardizes "Wok" and "wok")
+    #    - Strip whitespace
+    if "product_name" in df.columns:
+        df["product_name"] = df["product_name"].astype(str).str.lower().str.strip()
+
+    # 5. Clean Price
+    if "price" in df.columns:
+        df["price"] = pd.to_numeric(df["price"], errors="coerce")
+
+    # 6. Safety Deduplication
+    df = df.drop_duplicates()
+
+    # ==========================================
+
+    # Verify Columns
     required_cols = ["product_id", "product_name", "product_type", "price"]
     missing = [c for c in required_cols if c not in df.columns]
     if missing:
@@ -41,7 +67,7 @@ def main():
             f"Available columns: {list(df.columns)}"
         )
 
-    # 3) Connect directly to Postgres container "db"
+    # 3) Connect directly to Postgres
     conn = psycopg2.connect(
         host="db",
         port=5432,
@@ -51,7 +77,7 @@ def main():
     )
     cur = conn.cursor()
 
-    # 4) Create / reset staging table
+    # 4) Create / Reset Staging Table
     cur.execute("""
         CREATE TABLE IF NOT EXISTS stg_product_list (
             product_id    TEXT,
@@ -82,4 +108,5 @@ def main():
     return {
         "rows_loaded": len(df),
         "source_url": FILE_URL,
+        "columns_found": list(df.columns)
     }

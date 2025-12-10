@@ -1,12 +1,11 @@
 import io
 import re
-from io import StringIO
-
 import requests
 import pandas as pd
 import psycopg2
-import pyarrow  # needed so pandas can read parquet via pyarrow
-
+import pyarrow  # Required for read_parquet
+from io import StringIO
+from io import BytesIO
 
 # 🔑 Raw URLs for the three Operations Department files
 URL_PRICES_1 = (
@@ -25,22 +24,6 @@ URL_PRICES_3 = (
 )
 
 
-def _sanitize_column(name: str) -> str:
-    """
-    Turn any column name into a safe Postgres identifier:
-    - lower case
-    - spaces and weird chars -> _
-    - prefix with _ if it starts with a digit
-    """
-    col = str(name).strip().lower()
-    col = re.sub(r"[^a-z0-9_]", "_", col)
-    if re.match(r"^[0-9]", col):
-        col = "_" + col
-    if col == "":
-        col = "col"
-    return col
-
-
 def _load_csv_from_github(url: str) -> pd.DataFrame:
     resp = requests.get(url, timeout=60)
     resp.raise_for_status()
@@ -50,25 +33,80 @@ def _load_csv_from_github(url: str) -> pd.DataFrame:
 def _load_parquet_from_github(url: str) -> pd.DataFrame:
     resp = requests.get(url, timeout=60)
     resp.raise_for_status()
+    # Use BytesIO for binary parquet data
     return pd.read_parquet(io.BytesIO(resp.content))
 
 
+def clean_dataframe(df: pd.DataFrame) -> pd.DataFrame:
+    """
+    Standardizes column names, cleans data, and removes junk columns.
+    """
+    # 1. Drop junk columns (Unnamed: 0, Unnamed__0, etc)
+    df = df.loc[:, ~df.columns.str.contains('^Unnamed', case=False)]
+
+    # 2. Normalize Headers
+    #    "Order_id" -> "order_id"
+    rename_map = {}
+    for col in df.columns:
+        lc = str(col).strip().lower()
+        if lc == "order_id":
+            rename_map[col] = "order_id"
+        elif lc == "price":
+            rename_map[col] = "price"
+        elif lc == "quantity":
+            rename_map[col] = "quantity"
+    
+    df = df.rename(columns=rename_map)
+
+    # 3. Verify Columns
+    required = ["order_id", "price", "quantity"]
+    missing = [c for c in required if c not in df.columns]
+    if missing:
+        raise ValueError(f"DataFrame missing expected columns: {missing}")
+
+    # 4. Clean Quantity
+    #    "6pieces", "6px", "4PC" -> 6 (Integer)
+    #    Regex strips everything that is NOT a digit
+    df["quantity"] = df["quantity"].astype(str).str.replace(r'\D', '', regex=True)
+    df["quantity"] = pd.to_numeric(df["quantity"], errors="coerce")
+
+    # 5. Clean Price
+    #    Ensure numeric (Float/Numeric)
+    df["price"] = pd.to_numeric(df["price"], errors="coerce")
+
+    return df[required]
+
+
 def main():
-    # 1) Load all three datasets from GitHub
-    df_prices1 = _load_csv_from_github(URL_PRICES_1)
-    df_prices2 = _load_csv_from_github(URL_PRICES_2)
-    df_prices3 = _load_parquet_from_github(URL_PRICES_3)
+    # 1) Load all three datasets
+    try:
+        # print("Loading DF1 (CSV)...")
+        df1 = _load_csv_from_github(URL_PRICES_1)
+        
+        # print("Loading DF2 (CSV)...")
+        df2 = _load_csv_from_github(URL_PRICES_2)
+        
+        # print("Loading DF3 (Parquet)...")
+        df3 = _load_parquet_from_github(URL_PRICES_3)
+    except Exception as e:
+        raise RuntimeError(f"Failed to download files: {e}")
 
-    # 2) Merge them into ONE big DataFrame
-    df_all = pd.concat([df_prices1, df_prices2, df_prices3],
-                       ignore_index=True, sort=False)
+    # 2) Clean each dataframe
+    df1 = clean_dataframe(df1)
+    df2 = clean_dataframe(df2)
+    df3 = clean_dataframe(df3)
 
-    # 3) Sanitize column names once for the combined DataFrame
-    original_cols = list(df_all.columns)
-    safe_cols = [_sanitize_column(c) for c in original_cols]
-    df_all.columns = safe_cols
+    # 3) Merge into ONE big DataFrame
+    #    Union of all rows
+    df_all = pd.concat([df1, df2, df3], ignore_index=True, sort=False)
+    
+    #    (Optional) Deduplication:
+    #    We avoid drop_duplicates() here just in case multiple line items 
+    #    have identical price/quantity for the same order (rare but possible).
+    #    If you want strictly unique rows, uncomment the next line:
+    #    df_all = df_all.drop_duplicates()
 
-    # 4) Connect once to Postgres
+    # 4) Connect to Postgres
     conn = psycopg2.connect(
         host="db",
         port=5432,
@@ -78,28 +116,31 @@ def main():
     )
     cur = conn.cursor()
 
-    # 5) Drop & recreate ONE staging table with all TEXT columns
+    # 5) Drop & recreate staging table
     table_name = "stg_line_item_data_prices"
     cur.execute(f"DROP TABLE IF EXISTS {table_name};")
 
-    cols_sql = ",\n".join(f"{col} TEXT" for col in safe_cols)
-    create_sql = f"""
+    #    Note: price is NUMERIC, quantity is INTEGER
+    cur.execute(f"""
         CREATE TABLE {table_name} (
-            {cols_sql}
+            order_id  TEXT,
+            price     NUMERIC,
+            quantity  INTEGER
         );
-    """
-    cur.execute(create_sql)
+    """)
 
-    # 6) Bulk insert everything using COPY
+    # 6) Bulk insert using COPY
     buffer = StringIO()
     df_all.to_csv(buffer, index=False, header=False)
     buffer.seek(0)
 
-    copy_sql = f"""
-        COPY {table_name} ({", ".join(safe_cols)})
+    cur.copy_expert(
+        f"""
+        COPY {table_name} (order_id, price, quantity)
         FROM STDIN WITH (FORMAT csv)
-    """
-    cur.copy_expert(copy_sql, buffer)
+        """,
+        buffer,
+    )
 
     conn.commit()
     cur.close()
@@ -108,6 +149,5 @@ def main():
     return {
         "table": table_name,
         "rows_loaded": len(df_all),
-        "columns": safe_cols,
         "sources": [URL_PRICES_1, URL_PRICES_2, URL_PRICES_3],
     }

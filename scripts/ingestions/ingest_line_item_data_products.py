@@ -1,12 +1,11 @@
 import io
 import re
-from io import StringIO
-
 import requests
 import pandas as pd
 import psycopg2
-import pyarrow  # required so pandas can read parquet via pyarrow
-
+import pyarrow  # Required for read_parquet
+from io import StringIO
+from io import BytesIO
 
 # 🔗 Raw URLs for the three Operations Department *products* files
 URL_PROD_1 = (
@@ -25,22 +24,6 @@ URL_PROD_3 = (
 )
 
 
-def _sanitize_column(name: str) -> str:
-    """
-    Turn any column name into a safe Postgres identifier:
-    - lower case
-    - spaces and weird chars -> _
-    - prefix with _ if it starts with a digit
-    """
-    col = str(name).strip().lower()
-    col = re.sub(r"[^a-z0-9_]", "_", col)
-    if re.match(r"^[0-9]", col):
-        col = "_" + col
-    if col == "":
-        col = "col"
-    return col
-
-
 def _load_csv_from_github(url: str) -> pd.DataFrame:
     resp = requests.get(url, timeout=60)
     resp.raise_for_status()
@@ -50,24 +33,65 @@ def _load_csv_from_github(url: str) -> pd.DataFrame:
 def _load_parquet_from_github(url: str) -> pd.DataFrame:
     resp = requests.get(url, timeout=60)
     resp.raise_for_status()
+    # Use BytesIO for binary parquet data
     return pd.read_parquet(io.BytesIO(resp.content))
 
 
-def main():
-    # 1) Load all three datasets from GitHub
-    df1 = _load_csv_from_github(URL_PROD_1)
-    df2 = _load_csv_from_github(URL_PROD_2)
-    df3 = _load_parquet_from_github(URL_PROD_3)
+def clean_dataframe(df: pd.DataFrame) -> pd.DataFrame:
+    """
+    Standardizes column names and removes junk columns.
+    """
+    # 1. Drop junk columns (Unnamed: 0, Unnamed__0, etc)
+    df = df.loc[:, ~df.columns.str.contains('^Unnamed', case=False)]
 
-    # 2) Merge them into ONE big DataFrame (union of columns)
+    # 2. Normalize Headers
+    #    "Order_id" -> "order_id"
+    rename_map = {}
+    for col in df.columns:
+        lc = str(col).strip().lower()
+        if lc == "order_id":
+            rename_map[col] = "order_id"
+        elif lc == "product_name":
+            rename_map[col] = "product_name"
+        elif lc == "product_id":
+            rename_map[col] = "product_id"
+    
+    df = df.rename(columns=rename_map)
+
+    # 3. Verify Columns
+    required = ["order_id", "product_name", "product_id"]
+    missing = [c for c in required if c not in df.columns]
+    if missing:
+        raise ValueError(f"DataFrame missing expected columns: {missing}")
+
+    return df[required]
+
+
+def main():
+    # 1) Load all three datasets
+    try:
+        # print("Loading DF1 (CSV)...")
+        df1 = _load_csv_from_github(URL_PROD_1)
+        
+        # print("Loading DF2 (CSV)...")
+        df2 = _load_csv_from_github(URL_PROD_2)
+        
+        # print("Loading DF3 (Parquet)...")
+        df3 = _load_parquet_from_github(URL_PROD_3)
+    except Exception as e:
+        raise RuntimeError(f"Failed to download files: {e}")
+
+    # 2) Clean each dataframe
+    df1 = clean_dataframe(df1)
+    df2 = clean_dataframe(df2)
+    df3 = clean_dataframe(df3)
+
+    # 3) Merge into ONE big DataFrame
+    #    Note: We do NOT drop duplicates here because multiple rows 
+    #    with same order_id+product_id likely imply Quantity > 1.
     df_all = pd.concat([df1, df2, df3], ignore_index=True, sort=False)
 
-    # 3) Sanitize column names once for the combined DataFrame
-    original_cols = list(df_all.columns)
-    safe_cols = [_sanitize_column(c) for c in original_cols]
-    df_all.columns = safe_cols
-
-    # 4) Connect once to Postgres
+    # 4) Connect to Postgres
     conn = psycopg2.connect(
         host="db",
         port=5432,
@@ -77,28 +101,30 @@ def main():
     )
     cur = conn.cursor()
 
-    # 5) Drop & recreate ONE staging table with all TEXT columns
+    # 5) Drop & recreate staging table
     table_name = "stg_line_item_data_products"
     cur.execute(f"DROP TABLE IF EXISTS {table_name};")
 
-    cols_sql = ",\n".join(f"{col} TEXT" for col in safe_cols)
-    create_sql = f"""
+    cur.execute(f"""
         CREATE TABLE {table_name} (
-            {cols_sql}
+            order_id      TEXT,
+            product_name  TEXT,
+            product_id    TEXT
         );
-    """
-    cur.execute(create_sql)
+    """)
 
-    # 6) Bulk insert everything using COPY
+    # 6) Bulk insert using COPY
     buffer = StringIO()
     df_all.to_csv(buffer, index=False, header=False)
     buffer.seek(0)
 
-    copy_sql = f"""
-        COPY {table_name} ({", ".join(safe_cols)})
+    cur.copy_expert(
+        f"""
+        COPY {table_name} (order_id, product_name, product_id)
         FROM STDIN WITH (FORMAT csv)
-    """
-    cur.copy_expert(copy_sql, buffer)
+        """,
+        buffer,
+    )
 
     conn.commit()
     cur.close()
@@ -107,6 +133,5 @@ def main():
     return {
         "table": table_name,
         "rows_loaded": len(df_all),
-        "columns": safe_cols,
         "sources": [URL_PROD_1, URL_PROD_2, URL_PROD_3],
     }
