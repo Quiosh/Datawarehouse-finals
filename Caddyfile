@@ -14,6 +14,10 @@
 	}
 }
 
+{$BASE_URL}:3000 {
+    reverse_proxy metabase:3000
+}
+
 {$BASE_URL} {
         bind {$ADDRESS}
         reverse_proxy /ws/* http://lsp:3001
