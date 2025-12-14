@@ -1,17 +1,12 @@
 import psycopg2
 
 def create_dimension_tables(cur):
-    print("0. Dropping old dimensions to ensure schema is correct...")
-    cur.execute("DROP TABLE IF EXISTS dim_user CASCADE;")
-    cur.execute("DROP TABLE IF EXISTS dim_staff CASCADE;")
-    cur.execute("DROP TABLE IF EXISTS dim_merchant CASCADE;")
-
     print("0. Creating Dimension Tables (User, Staff, Merchant)...")
     
-    # --- 1. DIM_USER (Key: sur_user) ---
+    # --- 1. DIM_USER ---
     cur.execute("""
-        CREATE TABLE dim_user (
-            sur_user        BIGSERIAL PRIMARY KEY,
+        CREATE TABLE IF NOT EXISTS dim_user (
+            user_key        BIGSERIAL PRIMARY KEY,
             source_user_id  TEXT NOT NULL,
             name            TEXT,
             valid_from      TIMESTAMP NOT NULL,
@@ -21,10 +16,10 @@ def create_dimension_tables(cur):
         CREATE INDEX IF NOT EXISTS idx_dim_user_lookup ON dim_user(source_user_id, valid_from);
     """)
 
-    # --- 2. DIM_STAFF (Key: sur_staff) ---
+    # --- 2. DIM_STAFF ---
     cur.execute("""
-        CREATE TABLE dim_staff (
-            sur_staff       BIGSERIAL PRIMARY KEY,
+        CREATE TABLE IF NOT EXISTS dim_staff (
+            staff_key       BIGSERIAL PRIMARY KEY,
             source_staff_id TEXT NOT NULL,
             name            TEXT,
             valid_from      TIMESTAMP NOT NULL,
@@ -34,10 +29,10 @@ def create_dimension_tables(cur):
         CREATE INDEX IF NOT EXISTS idx_dim_staff_lookup ON dim_staff(source_staff_id, valid_from);
     """)
 
-    # --- 3. DIM_MERCHANT (Key: sur_merchant) ---
+    # --- 3. DIM_MERCHANT ---
     cur.execute("""
-        CREATE TABLE dim_merchant (
-            sur_merchant       BIGSERIAL PRIMARY KEY,
+        CREATE TABLE IF NOT EXISTS dim_merchant (
+            merchant_key       BIGSERIAL PRIMARY KEY,
             source_merchant_id TEXT NOT NULL,
             name               TEXT,
             valid_from         TIMESTAMP NOT NULL,
@@ -48,19 +43,19 @@ def create_dimension_tables(cur):
     """)
 
 def add_surrogate_columns(cur):
-    print("0B. Ensuring staging tables have 'sur_' columns...")
+    print("0B. Ensuring staging tables have '_key' columns...")
     
-    # Add sur_user to user-related tables
+    # Add user_key to user-related tables
     for table in ['stg_user_data', 'stg_user_job', 'stg_user_credit_card', 'stg_order_data']:
-        cur.execute(f"ALTER TABLE {table} ADD COLUMN IF NOT EXISTS sur_user BIGINT;")
+        cur.execute(f"ALTER TABLE {table} ADD COLUMN IF NOT EXISTS user_key BIGINT;")
 
-    # Add sur_staff / sur_merchant to their tables
-    cur.execute("ALTER TABLE stg_staff_data ADD COLUMN IF NOT EXISTS sur_staff BIGINT;")
-    cur.execute("ALTER TABLE stg_merchant_data ADD COLUMN IF NOT EXISTS sur_merchant BIGINT;")
+    # Add staff_key/merchant_key to their tables
+    cur.execute("ALTER TABLE stg_staff_data ADD COLUMN IF NOT EXISTS staff_key BIGINT;")
+    cur.execute("ALTER TABLE stg_merchant_data ADD COLUMN IF NOT EXISTS merchant_key BIGINT;")
     
-    # Add keys to the bridge table (Order w/ Merchant)
-    cur.execute("ALTER TABLE stg_order_with_merchant_data ADD COLUMN IF NOT EXISTS sur_staff BIGINT;")
-    cur.execute("ALTER TABLE stg_order_with_merchant_data ADD COLUMN IF NOT EXISTS sur_merchant BIGINT;")
+    # Add keys to the bridge table
+    cur.execute("ALTER TABLE stg_order_with_merchant_data ADD COLUMN IF NOT EXISTS staff_key BIGINT;")
+    cur.execute("ALTER TABLE stg_order_with_merchant_data ADD COLUMN IF NOT EXISTS merchant_key BIGINT;")
 
 # ==============================================================================
 # LOGIC BLOCK: GENERIC SCD2 LOADER
@@ -88,9 +83,7 @@ def process_scd2_dimension(cur, dim_name, stg_name, id_col, name_col):
 
     # 2. Insert New Versions into Dimension
     print("   -> Loading dimension...")
-    
-    # DYNAMIC KEY NAME: dim_user -> sur_user
-    dim_pk = f"sur_{dim_name.split('_')[1]}" 
+    dim_pk = f"{dim_name.split('_')[1]}_key" # e.g. user_key
     
     cur.execute(f"""
         INSERT INTO {dim_name} (source_{id_col}, {name_col}, valid_from, valid_to, is_current)
@@ -127,7 +120,7 @@ def process_scd2_dimension(cur, dim_name, stg_name, id_col, name_col):
     cur.execute(f"CREATE INDEX idx_map_{dim_name} ON temp_map_{dim_name}(original_id);")
 
     # 4. Update the Staging Table itself
-    print(f"   -> Updating {stg_name} with key {dim_pk}...")
+    print(f"   -> Updating {stg_name} with keys...")
     cur.execute(f"""
         UPDATE {stg_name} s
         SET {dim_pk} = m.{dim_pk}, possible_duplicate = FALSE
@@ -145,7 +138,7 @@ def update_user_children(cur):
     print("   -> Updating stg_user_job...")
     cur.execute("""
         UPDATE stg_user_job c
-        SET sur_user = m.sur_user, possible_duplicate = FALSE
+        SET user_key = m.user_key, possible_duplicate = FALSE
         FROM temp_map_dim_user m
         WHERE c.user_id = m.original_id AND c.name = m.name;
     """)
@@ -154,7 +147,7 @@ def update_user_children(cur):
     print("   -> Updating stg_user_credit_card...")
     cur.execute("""
         UPDATE stg_user_credit_card c
-        SET sur_user = m.sur_user
+        SET user_key = m.user_key
         FROM temp_map_dim_user m
         WHERE c.user_id = m.original_id AND c.name = m.name;
     """)
@@ -163,7 +156,7 @@ def update_user_children(cur):
     print("   -> Updating stg_order_data...")
     cur.execute("""
         UPDATE stg_order_data o
-        SET sur_user = m.sur_user
+        SET user_key = m.user_key
         FROM temp_map_dim_user m
         WHERE o.user_id = m.original_id
           AND o.transaction_date >= m.valid_from
@@ -179,7 +172,7 @@ def update_staff_merchant_children(cur):
     print("   -> Updating stg_order_with_merchant_data (Staff Keys)...")
     cur.execute("""
         UPDATE stg_order_with_merchant_data c
-        SET sur_staff = m.sur_staff
+        SET staff_key = m.staff_key
         FROM temp_map_dim_staff m, stg_order_data o
         WHERE c.staff_id = m.original_id
           AND c.order_id = o.order_id
@@ -190,7 +183,7 @@ def update_staff_merchant_children(cur):
     print("   -> Updating stg_order_with_merchant_data (Merchant Keys)...")
     cur.execute("""
         UPDATE stg_order_with_merchant_data c
-        SET sur_merchant = m.sur_merchant
+        SET merchant_key = m.merchant_key
         FROM temp_map_dim_merchant m, stg_order_data o
         WHERE c.merchant_id = m.original_id
           AND c.order_id = o.order_id
@@ -218,7 +211,7 @@ def main():
         # 2. Process Dimensions
         #    Args: (cur, dim_name, stg_name, id_col, name_col)
         process_scd2_dimension(cur, "dim_user", "stg_user_data", "user_id", "name")
-        update_user_children(cur) 
+        update_user_children(cur) # Run immediately while temp map exists
 
         process_scd2_dimension(cur, "dim_staff", "stg_staff_data", "staff_id", "name")
         process_scd2_dimension(cur, "dim_merchant", "stg_merchant_data", "merchant_id", "name")
@@ -232,7 +225,7 @@ def main():
         cur.execute("DROP TABLE IF EXISTS temp_map_dim_merchant;")
         
         conn.commit()
-        print("\n✅ Dimensions Created and Surrogate Keys (sur_*) Propagated Successfully!")
+        print("\n✅ Dimensions Created and Keys Propagated Successfully!")
         return {"status": "success"}
 
     except Exception as e:
