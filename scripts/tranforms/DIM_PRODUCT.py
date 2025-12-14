@@ -1,4 +1,9 @@
 import psycopg2
+import logging
+
+logging.basicConfig(
+    level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s"
+)
 
 
 def main():
@@ -13,81 +18,45 @@ def main():
     cur = conn.cursor()
 
     try:
-        print("Starting DIM_PRODUCT Transformation...")
+        logging.info("Starting DIM_PRODUCT processing...")
 
-        # ==============================================================================
-        # STEP 0: ENSURE DIMENSION + COLUMNS EXIST
-        # ==============================================================================
-        print("0. Ensuring dim_product table and staging columns exist...")
-
-        # Create DIM_PRODUCT table
-        # Note: 'subcategory' is excluded as requested.
-        # We use 'category' to store the 'product_type' from staging.
+        # 2) Create Table
         cur.execute("""
             CREATE TABLE IF NOT EXISTS dim_product (
-                product_key   SERIAL PRIMARY KEY,
-                product_name  VARCHAR(255),
-                category      VARCHAR(100),
-                price         DECIMAL(10,2),
-                UNIQUE(product_name, category, price) -- distinct product versions
+                product_key BIGSERIAL PRIMARY KEY,
+                product_id TEXT NOT NULL,
+                product_name TEXT,
+                product_type TEXT,
+                base_price NUMERIC
             );
         """)
 
-        # Add product_key column to stg_product_data
-        # (Assuming your staging table is named 'stg_product_data' based on previous patterns)
+        # 3) Load Data
+        logging.info("Loading products...")
         cur.execute("""
-            ALTER TABLE stg_product_list
-            ADD COLUMN IF NOT EXISTS product_key INTEGER;
+            INSERT INTO dim_product (product_id, product_name, product_type, base_price)
+            SELECT DISTINCT
+                product_id,
+                product_name,
+                product_type,
+                price
+            FROM stg_product_list s
+            WHERE NOT EXISTS (
+                SELECT 1 FROM dim_product d WHERE d.product_id = s.product_id
+            );
         """)
 
-        # ==============================================================================
-        # STEP 1: POPULATE DIMENSION
-        # ==============================================================================
-        print("1. Populating dim_product from stg_product_list...")
-
-        # We select DISTINCT combinations. 
-        # Note: We use lowercase column names (product_name, etc.) to match Postgres default storage.
-        cur.execute("""
-            INSERT INTO dim_product (product_name, category, price)
-            SELECT DISTINCT 
-                Product_name, 
-                Product_type, -- Maps to 'category'
-                Price
-            FROM stg_product_list
-            ON CONFLICT (product_name, category, price) DO NOTHING;
-        """)
-
-        # ==============================================================================
-        # STEP 2: PROPAGATE SURROGATE KEY TO STAGING
-        # ==============================================================================
-        print("2. Updating stg_product_list with generated product_key...")
-
-        # Link back to staging to fill the key
-        cur.execute("""
-            UPDATE stg_product_list s
-            SET product_key = d.product_key
-            FROM dim_product d
-            WHERE s.Product_name = d.product_name
-              AND s.Product_type = d.category
-              AND s.Price = d.price;
-        """)
-
-        # ==============================================================================
-        # STEP 3: COMMIT
-        # ==============================================================================
+        count = cur.rowcount
         conn.commit()
-        print("DIM_PRODUCT loaded and Staging keys updated successfully!")
-
-        return {
-            "status": "success",
-            "message": "DIM_PRODUCT populated and keys propagated."
-        }
+        logging.info(f" DIM_PRODUCT loaded. Inserted {count} new products.")
 
     except Exception as e:
         conn.rollback()
-        print(f"Error during transformation: {e}")
-        raise e
-
+        logging.error(f" DIM_PRODUCT failed: {e}")
+        raise
     finally:
         cur.close()
         conn.close()
+
+if __name__ == "__main__":
+    main()

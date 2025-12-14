@@ -1,4 +1,9 @@
 import psycopg2
+import logging
+
+logging.basicConfig(
+    level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s"
+)
 
 
 def main():
@@ -10,86 +15,51 @@ def main():
         password="shopzada",
         dbname="shopzada",
     )
-
     cur = conn.cursor()
 
     try:
-        print("Starting DIM_STAFF Transformation...")
+        logging.info("Starting DIM_STAFF enrichment...")
 
-        # ==============================================================================
-        # STEP 0: ENSURE DIMENSION + COLUMNS EXIST
-        # - dim_staff: holds surrogate key (staff_key)
-        # - Add staff_key columns to staging table (for easier Fact loading later)
-        # ==============================================================================
+        # 2) Remove history columns (Convert to SCD Type 1)
+        drop_cols_query = """
+            ALTER TABLE dim_staff 
+            DROP COLUMN IF EXISTS is_current,
+            DROP COLUMN IF EXISTS valid_from,
+            DROP COLUMN IF EXISTS valid_to;
+        """
+        cur.execute(drop_cols_query)
 
-        print("0. Ensuring dim_staff table and staging columns exist...")
+        # 3) Add Missing Columns
+        columns_to_add = [
+            "job_level TEXT",
+            "city TEXT",
+            "country TEXT",
+        ]
+        for col in columns_to_add:
+            cur.execute(f"ALTER TABLE dim_staff ADD COLUMN IF NOT EXISTS {col};")
 
-        # Create DIM_STAFF table
+        # 4) Update Details (From stg_staff_data)
+        logging.info("Updating Staff Details...")
         cur.execute("""
-            CREATE TABLE IF NOT EXISTS dim_staff (
-                staff_key   SERIAL PRIMARY KEY,
-                staff_name  VARCHAR(255),
-                region      VARCHAR(100),
-                UNIQUE(staff_name, region) -- Prevent exact duplicates
-            );
+            UPDATE dim_staff d
+            SET 
+                job_level = s.job_level,
+                city = s.city,
+                country = s.country
+            FROM stg_staff_data s
+            WHERE d.source_staff_id = s.staff_id;
         """)
-
-        # Add staff_key column to stg_staff_data (Idempotent)
-        cur.execute("""
-            ALTER TABLE "stg_staff_data"
-            ADD COLUMN IF NOT EXISTS staff_key INTEGER;
-        """)
-
-        # ==============================================================================
-        # STEP 1: POPULATE DIMENSION
-        # Select distinct staff from staging and insert into dimension
-        # ==============================================================================
-
-        print("1. Populating dim_staff from stg_staff_data...")
-
-        # We use ON CONFLICT DO NOTHING to avoid crashing if run multiple times
-        cur.execute("""
-            INSERT INTO dim_staff (staff_name, region)
-            SELECT DISTINCT 
-                Name, 
-                COALESCE(State, 'Unknown')
-            FROM "stg_staff_data"
-            ON CONFLICT (staff_name, region) DO NOTHING;
-        """)
-
-        # ==============================================================================
-        # STEP 2: PROPAGATE SURROGATE KEY TO STAGING
-        # Update stg_staff_data with the new staff_key from dim_staff
-        # ==============================================================================
-
-        print("2. Updating stg_staff_data with generated staff_key...")
-
-        # We join back to the dimension to retrieve the generated ID
-        cur.execute("""
-            UPDATE "stg_staff_data" s
-            SET staff_key = d.staff_key
-            FROM dim_staff d
-            WHERE s.Name = d.staff_name
-              AND COALESCE(s.State, 'Unknown') = d.region;
-        """)
-
-        # ==============================================================================
-        # STEP 3: COMMIT
-        # ==============================================================================
 
         conn.commit()
-        print("DIM_STAFF loaded and Staging keys updated successfully!")
-
-        return {
-            "status": "success",
-            "message": "DIM_STAFF populated and keys propagated.",
-        }
+        logging.info(" DIM_STAFF enrichment complete.")
 
     except Exception as e:
         conn.rollback()
-        print(f"Error during transformation: {e}")
-        raise e
-
+        logging.error(f" DIM_STAFF failed: {e}")
+        raise
     finally:
         cur.close()
         conn.close()
+
+if __name__ == "__main__":
+    main()

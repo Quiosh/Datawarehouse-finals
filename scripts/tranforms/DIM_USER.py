@@ -1,4 +1,9 @@
 import psycopg2
+import logging
+
+logging.basicConfig(
+    level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s"
+)
 
 
 def main():
@@ -13,73 +18,68 @@ def main():
     cur = conn.cursor()
 
     try:
-        print("Starting DIM_USER Transformation (String Keys)...")
+        logging.info("Starting DIM_USER enrichment...")
 
-        # ==============================================================================
-        # STEP 0: REBUILD TABLE WITH VARCHAR KEY
-        # ==============================================================================
-        print("0. Recreating dim_user with VARCHAR key...")
+        # Remove columns not present in schema
+        drop_cols_query = """
+            ALTER TABLE dim_user 
+            DROP COLUMN IF EXISTS creation_date,
+            DROP COLUMN IF EXISTS valid_from,
+            DROP COLUMN IF EXISTS valid_to,
+            DROP COLUMN IF EXISTS is_current;
+        """
+        cur.execute(drop_cols_query)
 
-        # Drop table to reset schema from Integer to String
-        cur.execute("DROP TABLE IF EXISTS dw_user CASCADE;")
+        # 2) Add Missing Columns
+        columns_to_add = [
+            "birthdate DATE",
+            "gender TEXT",
+            "user_type TEXT",
+            "city TEXT",
+            "state TEXT",
+            "country TEXT",
+            "job_title TEXT",
+            "job_level TEXT",
+        ]
+        for col in columns_to_add:
+            cur.execute(f"ALTER TABLE dim_user ADD COLUMN IF NOT EXISTS {col};")
 
+        # 3) Update Demographics (From stg_user_data)
+        logging.info("Updating User Demographics...")
         cur.execute("""
-            CREATE TABLE dw_user (
-                user_key    VARCHAR(50) PRIMARY KEY,
-                user_name   VARCHAR(255),
-                segment         VARCHAR(50),
-                UNIQUE(user_key)
-            );
+            UPDATE dim_user d
+            SET 
+                birthdate = s.birthdate,
+                gender = s.gender,
+                user_type = s.user_type,
+                city = s.city,
+                state = s.state,
+                country = s.country
+            FROM stg_user_data s
+            WHERE d.source_user_id = s.user_id;
         """)
 
-        # Reset the key column in staging to ensure it matches VARCHAR type
+        # 4) Update Jobs (From stg_user_job)
+        logging.info("Updating User Jobs...")
         cur.execute("""
-            ALTER TABLE stg_user_data
-            DROP COLUMN IF EXISTS user_key;
-            
-            ALTER TABLE stg_user_data
-            ADD COLUMN user_key VARCHAR(50);
+            UPDATE dim_user d
+            SET 
+                job_title = j.job_title,
+                job_level = j.job_level
+            FROM stg_user_job j
+            WHERE d.source_user_id = j.user_id;
         """)
 
-        # ==============================================================================
-        # STEP 1: POPULATE DIRECTLY
-        # ==============================================================================
-        print("1. Populating dim_user using User_id directly...")
-
-        # Map User_id directly to user_key
-        cur.execute("""
-            INSERT INTO dw_user (user_key, user_name, segment)
-            SELECT DISTINCT 
-                User_id, 
-                name, 
-                COALESCE(user_type, 'Unknown')
-            FROM stg_user_data
-            ON CONFLICT (user_key) DO NOTHING;
-        """)
-
-        # ==============================================================================
-        # STEP 2: UPDATE STAGING
-        # ==============================================================================
-        print("2. Syncing user_key back to stg_user_data...")
-
-        cur.execute("""
-            UPDATE stg_user_data
-            SET user_key = User_id;
-        """)
-
-        # ==============================================================================
-        # STEP 3: COMMIT
-        # ==============================================================================
         conn.commit()
-        print("DIM_USER loaded. Keys are now strings (e.g., 'USER00128').")
-
-        return {"status": "success"}
+        logging.info(" DIM_USER enrichment complete.")
 
     except Exception as e:
         conn.rollback()
-        print(f"Error during transformation: {e}")
-        raise e
-
+        logging.error(f" DIM_USER failed: {e}")
+        raise
     finally:
         cur.close()
         conn.close()
+
+if __name__ == "__main__":
+    main()

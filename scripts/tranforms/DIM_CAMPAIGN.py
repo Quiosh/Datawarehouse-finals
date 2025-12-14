@@ -1,4 +1,10 @@
 import psycopg2
+import logging
+
+# Setup logging
+logging.basicConfig(
+    level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s"
+)
 
 
 def main():
@@ -13,79 +19,47 @@ def main():
     cur = conn.cursor()
 
     try:
-        print("Starting DIM_CAMPAIGN Transformation...")
+        logging.info("Starting DIM_CAMPAIGN processing...")
 
-        # ==============================================================================
-        # STEP 0: ENSURE DIMENSION + COLUMNS EXIST
-        # ==============================================================================
-        print("0. Ensuring dim_campaign table and staging columns exist...")
-
-        # Create DIM_CAMPAIGN table
-        # We assume 'discount_value' maps to the 'Discount' column in staging
+        # 2) Create Table
         cur.execute("""
             CREATE TABLE IF NOT EXISTS dim_campaign (
-                campaign_key    SERIAL PRIMARY KEY,
-                campaign_name   VARCHAR(255),
-                discount_value  DECIMAL(10,2),
-                UNIQUE(campaign_name, discount_value)
+                campaign_key BIGSERIAL PRIMARY KEY,
+                campaign_id TEXT UNIQUE NOT NULL,
+                campaign_name TEXT,
+                description TEXT,
+                discount NUMERIC
             );
         """)
 
-        # Add campaign_key column to stg_campaign_data
-        # (Assuming your staging table is named 'stg_campaign_data')
+        # 3) Extract & Load (Insert new records only)
+        # We perform an INSERT INTO ... SELECT ... WHERE NOT EXISTS to handle duplicates efficiently
+        logging.info("Loading new campaigns...")
         cur.execute("""
-            ALTER TABLE stg_campaign_data
-            ADD COLUMN IF NOT EXISTS campaign_key INTEGER;
+            INSERT INTO dim_campaign (campaign_id, campaign_name, description, discount)
+            SELECT DISTINCT
+                campaign_id,
+                campaign_name,
+                campaign_description,
+                discount
+            FROM stg_campaign_data s
+            WHERE NOT EXISTS (
+                SELECT 1 FROM dim_campaign d WHERE d.campaign_id = s.campaign_id
+            );
         """)
 
-        # ==============================================================================
-        # STEP 1: POPULATE DIMENSION
-        # ==============================================================================
-        print("1. Populating dim_campaign from stg_campaign_data...")
-
-        # We map:
-        # stg.campaign_name -> dim.campaign_name
-        # stg.discount      -> dim.discount_value
-        # using COALESCE(..., 0) to handle potential NULLs in discount
-        cur.execute("""
-            INSERT INTO dim_campaign (campaign_name, discount_value)
-            SELECT DISTINCT 
-                campaign_name, 
-                COALESCE(discount, 0)
-            FROM stg_campaign_data
-            ON CONFLICT (campaign_name, discount_value) DO NOTHING;
-        """)
-
-        # ==============================================================================
-        # STEP 2: PROPAGATE SURROGATE KEY TO STAGING
-        # ==============================================================================
-        print("2. Updating stg_campaign_data with generated campaign_key...")
-
-        # Update the staging table so we can link it to facts later
-        cur.execute("""
-            UPDATE stg_campaign_data s
-            SET campaign_key = d.campaign_key
-            FROM dim_campaign d
-            WHERE s.campaign_name = d.campaign_name
-              AND COALESCE(s.discount, 0) = d.discount_value;
-        """)
-
-        # ==============================================================================
-        # STEP 3: COMMIT
-        # ==============================================================================
+        # Log count
+        inserted_count = cur.rowcount
         conn.commit()
-        print("DIM_CAMPAIGN loaded and Staging keys updated successfully!")
-
-        return {
-            "status": "success",
-            "message": "DIM_CAMPAIGN populated and keys propagated.",
-        }
+        logging.info(f" DIM_CAMPAIGN loaded. Inserted {inserted_count} new rows.")
 
     except Exception as e:
         conn.rollback()
-        print(f"Error during transformation: {e}")
-        raise e
-
+        logging.error(f" DIM_CAMPAIGN failed: {e}")
+        raise
     finally:
         cur.close()
         conn.close()
+
+if __name__ == "__main__":
+    main()
