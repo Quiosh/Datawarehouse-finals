@@ -1,14 +1,12 @@
 import psycopg2
 import logging
 
-# Setup logging
 logging.basicConfig(
     level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s"
 )
 
 
 def main():
-    # 1) Connect to Postgres
     conn = psycopg2.connect(
         host="db",
         port=5432,
@@ -21,7 +19,6 @@ def main():
     try:
         logging.info("Starting DIM_CAMPAIGN processing...")
 
-        # 2) Create Table
         cur.execute("""
             CREATE TABLE IF NOT EXISTS dim_campaign (
                 campaign_key BIGSERIAL PRIMARY KEY,
@@ -32,8 +29,6 @@ def main():
             );
         """)
 
-        # 3) Extract & Load (Insert new records only)
-        # We perform an INSERT INTO ... SELECT ... WHERE NOT EXISTS to handle duplicates efficiently
         logging.info("Loading new campaigns...")
         cur.execute("""
             INSERT INTO dim_campaign (campaign_id, campaign_name, description, discount)
@@ -48,7 +43,6 @@ def main():
             );
         """)
 
-        # Log count
         inserted_count = cur.rowcount
         conn.commit()
         logging.info(f" DIM_CAMPAIGN loaded. Inserted {inserted_count} new rows.")

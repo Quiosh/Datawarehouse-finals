@@ -7,7 +7,6 @@ logging.basicConfig(
 
 
 def main():
-    # 1) Connect to Postgres
     conn = psycopg2.connect(
         host="db",
         port=5432,
@@ -20,7 +19,6 @@ def main():
     try:
         logging.info("Starting DIM_PRODUCT processing...")
 
-        # 2) Create Table
         cur.execute("""
             CREATE TABLE IF NOT EXISTS dim_product (
                 product_key BIGSERIAL PRIMARY KEY,
@@ -31,7 +29,6 @@ def main():
             );
         """)
 
-        # 3) Load Data
         logging.info("Loading products...")
         cur.execute("""
             INSERT INTO dim_product (product_id, product_name, product_type, base_price)

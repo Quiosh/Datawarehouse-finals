@@ -7,7 +7,6 @@ logging.basicConfig(
 
 
 def main():
-    # 1) Connect to Postgres
     conn = psycopg2.connect(
         host="db",
         port=5432,
@@ -20,7 +19,6 @@ def main():
     try:
         logging.info("Starting DIM_STAFF enrichment...")
 
-        # 2) Remove history columns (Convert to SCD Type 1)
         drop_cols_query = """
             ALTER TABLE dim_staff 
             DROP COLUMN IF EXISTS is_current,
@@ -29,7 +27,6 @@ def main():
         """
         cur.execute(drop_cols_query)
 
-        # 3) Add Missing Columns
         columns_to_add = [
             "job_level TEXT",
             "city TEXT",
@@ -38,7 +35,6 @@ def main():
         for col in columns_to_add:
             cur.execute(f"ALTER TABLE dim_staff ADD COLUMN IF NOT EXISTS {col};")
 
-        # 4) Update Details (From stg_staff_data)
         logging.info("Updating Staff Details...")
         cur.execute("""
             UPDATE dim_staff d

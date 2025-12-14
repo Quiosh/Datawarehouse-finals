@@ -7,7 +7,6 @@ logging.basicConfig(
 
 
 def main():
-    # 1) Connect to Postgres
     conn = psycopg2.connect(
         host="db",
         port=5432,
@@ -20,7 +19,6 @@ def main():
     try:
         logging.info("Starting FACT_CAMPAIGN_PERFORMANCE processing...")
 
-        # 2) Create Table
         cur.execute("""
             CREATE TABLE IF NOT EXISTS fact_campaign_performance (
                 campaign_perf_key BIGSERIAL PRIMARY KEY,
@@ -35,10 +33,8 @@ def main():
             );
         """)
 
-        # 3) Clear Table
         cur.execute("TRUNCATE TABLE fact_campaign_performance CASCADE;")
 
-        # 4) Load Aggregates
         logging.info("Aggregating campaign metrics...")
         cur.execute("""
             INSERT INTO fact_campaign_performance (

@@ -8,7 +8,6 @@ logging.basicConfig(
 
 
 def main():
-    # 1) Connect to Postgres
     conn = psycopg2.connect(
         host="db",
         port=5432,
@@ -21,7 +20,6 @@ def main():
     try:
         logging.info("Starting DIM_DATE processing...")
 
-        # 2) Create Table
         cur.execute("""
             CREATE TABLE IF NOT EXISTS dim_date (
                 date_key INT PRIMARY KEY,
@@ -36,7 +34,6 @@ def main():
             );
         """)
 
-        # 3) Generate Dates (2020 to 2030)
         start_date = date(2020, 1, 1)
         end_date = date(2030, 12, 31)
         delta = end_date - start_date
@@ -69,7 +66,6 @@ def main():
             )
             batch_data.append(record)
 
-        # 4) Bulk Insert
         if batch_data:
             cur.executemany(insert_query, batch_data)
             logging.info(f" Inserted/Checked {len(batch_data)} dates in DIM_DATE.")
