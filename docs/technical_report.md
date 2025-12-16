@@ -175,7 +175,122 @@ graph LR
 - **Orchestration:** Windmill runs an ingestion+transform workflow.
 - **BI:** Metabase provides dashboards and ad-hoc querying.
 
-### 5.3 Orchestration overview
+### 5.3 Physical Data Model (ERD)
+```mermaid
+erDiagram
+    %% Fact Tables
+    FACT_CAMPAIGN_PERFORMANCE {
+        int campaign_perf_key PK
+        int campaign_key FK
+        int date_key FK
+        int total_orders
+        decimal total_revenue
+        decimal average_order_value
+        int unique_customers
+    }
+
+    FACT_ORDERS {
+        int order_key PK
+        text order_id
+        int user_key FK
+        int merchant_key FK
+        int staff_key FK
+        int campaign_key FK
+        int date_key FK
+        int delay_in_days
+        decimal total_amount
+    }
+
+    FACT_ORDER_ITEMS {
+        int order_item_key PK
+        text order_id
+        int product_key FK
+        int user_key FK
+        int merchant_key FK
+        int campaign_key FK
+        int date_key FK
+        int quantity
+        decimal unit_price
+        decimal total_price
+    }
+
+    %% Dimensions
+    DIM_CAMPAIGN {
+        int campaign_key PK
+        text campaign_id
+        text campaign_name
+        text description
+        decimal discount
+    }
+
+    DIM_PRODUCT {
+        int product_key PK
+        text product_id
+        text product_name
+        text product_type
+        decimal base_price
+    }
+
+    DIM_USER {
+        int user_key PK
+        text source_user_id
+        text name
+        date birthdate
+        text gender
+        text user_type
+        text city
+        text state
+        text country
+        text job_title
+        text job_level
+    }
+
+    DIM_MERCHANT {
+        int merchant_key PK
+        text source_merchant_id
+        text name
+        text city
+        text state
+        text country
+    }
+
+    DIM_STAFF {
+        int staff_key PK
+        text source_staff_id
+        text name
+        text job_level
+        text city
+        text country
+    }
+
+    DIM_DATE {
+        int date_key PK
+        date full_date
+        int year
+        int quarter
+        int month
+        int day
+        boolean is_weekend
+    }
+
+    %% Relationships
+    FACT_CAMPAIGN_PERFORMANCE }|..|{ DIM_CAMPAIGN : "evaluates"
+    FACT_CAMPAIGN_PERFORMANCE }|..|{ DIM_DATE : "measured on"
+
+    FACT_ORDERS }|..|{ DIM_USER : "placed by"
+    FACT_ORDERS }|..|{ DIM_MERCHANT : "sold by"
+    FACT_ORDERS }|..|{ DIM_STAFF : "processed by"
+    FACT_ORDERS }|..|{ DIM_CAMPAIGN : "attributed to"
+    FACT_ORDERS }|..|{ DIM_DATE : "occurred on"
+
+    FACT_ORDER_ITEMS }|..|{ DIM_PRODUCT : "contains"
+    FACT_ORDER_ITEMS }|..|{ DIM_USER : "placed by"
+    FACT_ORDER_ITEMS }|..|{ DIM_MERCHANT : "sold by"
+    FACT_ORDER_ITEMS }|..|{ DIM_CAMPAIGN : "attributed to"
+    FACT_ORDER_ITEMS }|..|{ DIM_DATE : "occurred on"
+```
+
+### 5.4 Orchestration overview
 
 A workflow definition runs ingestion modules (often in parallel groups), then runs dimension builds, then fact builds.
 
