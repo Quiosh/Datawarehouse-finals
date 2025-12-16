@@ -205,3 +205,4 @@ erDiagram
     FACT_ORDER_ITEMS }|..|{ DIM_MERCHANT : "sold by"
     FACT_ORDER_ITEMS }|..|{ DIM_CAMPAIGN : "attributed to"
     FACT_ORDER_ITEMS }|..|{ DIM_DATE : "occurred on"
+```
