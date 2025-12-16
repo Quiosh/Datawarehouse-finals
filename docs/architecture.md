@@ -7,42 +7,35 @@ This Data Warehouse solution follows a modern ELT (Extract, Load, Transform) pip
 ```mermaid
 graph LR
     subgraph "Data Sources"
-        BD[Business Dept<br/>(Excel)]
-        CMD[Customer Mgmt<br/>(Pickle, JSON, CSV)]
-        ENT[Enterprise Dept<br/>(HTML, Parquet, CSV)]
-        MKT[Marketing Dept<br/>(CSV)]
-        OPS[Operations Dept<br/>(Parquet, Pickle, CSV, Excel, JSON, HTML)]
+        BD["Business Dept<br>(Excel)"]
+        CMD["Customer Mgmt<br>(Pickle, JSON, CSV)"]
+        ENT["Enterprise Dept<br>(HTML, Parquet, CSV)"]
+        MKT["Marketing Dept<br>(CSV)"]
+        OPS["Operations Dept<br>(Parquet, Pickle, CSV, Excel, JSON, HTML)"]
     end
-
     subgraph "Ingestion Layer"
         Scripts[Python Ingestion Scripts]
     end
-
     subgraph "Data Warehouse (PostgreSQL)"
         Raw[Raw / Staging Tables]
-        Transform[Transformation Logic<br/>(dbt / SQL / Python)]
-        DWH[Dimensional Model<br/>(Star Schema)]
+        Transform["Transformation Logic<br>(dbt / SQL / Python)"]
+        DWH["Dimensional Model<br>(Star Schema)"]
     end
-
     subgraph "Orchestration"
         Windmill[Windmill / Workflow Engine]
     end
-
     subgraph "BI & Analysis"
         Metabase[Metabase Dashboard]
     end
-
     BD --> Scripts
     CMD --> Scripts
     ENT --> Scripts
     MKT --> Scripts
     OPS --> Scripts
-
     Scripts --> Raw
     Raw --> Transform
     Transform --> DWH
     DWH --> Metabase
-
     Windmill --> Scripts
     Windmill --> Transform
 ```
