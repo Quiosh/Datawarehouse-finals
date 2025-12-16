@@ -15,11 +15,11 @@ flowchart LR
   %% Sources
   %% =====================
   subgraph SRC["Departmental sources (datasets/)"]
-    SRC_OPS[Operations Dept\norder_data_*\nline_item_data_*\norder_delays.html]
-    SRC_ENT[Enterprise Dept\nmerchant_data.html\nstaff_data.html\norder_with_merchant_data*]
-    SRC_CMD[Customer Mgmt Dept\nuser_data.json\nuser_job.csv\nuser_credit_card.pickle]
-    SRC_MKT[Marketing Dept\ncampaign_data.csv\ntransactional_campaign_data.csv]
-    SRC_BD[Business Dept\nproduct_list.xlsx]
+    SRC_OPS["Operations Dept<br/>order_data_*<br/>line_item_data_*<br/>order_delays.html"]
+    SRC_ENT["Enterprise Dept<br/>merchant_data.html<br/>staff_data.html<br/>order_with_merchant_data*"]
+    SRC_CMD["Customer Mgmt Dept<br/>user_data.json<br/>user_job.csv<br/>user_credit_card.pickle"]
+    SRC_MKT["Marketing Dept<br/>campaign_data.csv<br/>transactional_campaign_data.csv"]
+    SRC_BD["Business Dept<br/>product_list.xlsx"]
   end
 
   %% =====================
@@ -70,7 +70,7 @@ flowchart LR
   %% Identity resolution
   %% =====================
   subgraph IDR[Identity resolution]
-    RESOLVE["transform_resolve_user_collisions\n(user surrogate key + validity windows)"]
+    RESOLVE["transform_resolve_user_collisions<br/>(user surrogate key + validity windows)"]
   end
 
   STG_USER --> RESOLVE
