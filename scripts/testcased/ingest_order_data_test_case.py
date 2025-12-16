@@ -41,6 +41,12 @@ URL_2023_H2 = (
     "datasets/Operations%20Department/order_data_20230601-20240101.html"
 )
 
+# Local test file (used as default if no upload is provided)
+URL_TEST_FILE = (
+    "https://raw.githubusercontent.com/Quiosh/Datawarehouse-finals/main/"
+    "datasets/Test%20Files/new_orders.csv"
+)
+
 
 # ---------- helpers to download + load ----------
 
@@ -137,47 +143,43 @@ def _standardize_order_df(df: pd.DataFrame) -> pd.DataFrame:
 
 def main(new_orders_file: bytes = None):
     """
-    Ingest order data.
+    Ingest ONLY the new test data and append it to the existing staging table.
     
     Args:
         new_orders_file: File upload from Windmill (passed as bytes).
     """
 
-    # 1) Load each slice from remote sources
-    df_2020_h1 = _standardize_order_df(_load_parquet(URL_2020_H1))
-    df_2020_h2 = _standardize_order_df(_load_pickle(URL_2020_H2))
-    df_2021    = _standardize_order_df(_load_csv(URL_2021))
-    df_2022    = _standardize_order_df(_load_xlsx(URL_2022))
-    df_2023_h1 = _standardize_order_df(_load_json(URL_2023_H1))
-    df_2023_h2 = _standardize_order_df(_load_html(URL_2023_H2))
+    df_new_orders = pd.DataFrame()
 
-    dfs = [df_2020_h1, df_2020_h2, df_2021, df_2022, df_2023_h1, df_2023_h2]
-
-    # 2) Load new orders file if uploaded
+    # 1) Load new orders file (Upload or Fallback)
     if new_orders_file:
         print("Processing uploaded file...")
         try:
-            # Windmill passes file uploads as bytes. 
+            # Windmill passes file uploads as bytes.
             # We must wrap it in BytesIO so pandas can read it like a file.
             file_stream = io.BytesIO(new_orders_file)
             df_new_orders = _standardize_order_df(pd.read_csv(file_stream))
-            dfs.append(df_new_orders)
             print(f"Successfully loaded {len(df_new_orders)} rows from uploaded file.")
         except Exception as e:
             print(f"Error reading uploaded file: {e}")
             raise e
+    else:
+        # Default to loading the test file from the defined local path/URL
+        print("No upload provided. Attempting to load default test file...")
+        try:
+            # We use _load_local_csv here since it is a local file path
+            df_new_orders = _standardize_order_df(_load_local_csv(URL_TEST_FILE))
+            print(f"Successfully loaded {len(df_new_orders)} rows from default test file.")
+        except Exception as e:
+            print(f"Could not load default test file: {e}")
+            # If no data found, we can just return or raise, but let's proceed with empty df
+            pass
 
-    # 3) Combine into one big DataFrame
-    df_all = pd.concat(
-        dfs,
-        ignore_index=True,
-        sort=False,
-    )
+    if df_new_orders.empty:
+        print("No new data to append.")
+        return {"rows_loaded": 0}
 
-    # 4) Safety Deduplication
-    df_all = df_all.drop_duplicates()
-
-    # 5) Connect to Postgres
+    # 2) Connect to Postgres
     conn = psycopg2.connect(
         host="db",
         port=5432,
@@ -189,21 +191,10 @@ def main(new_orders_file: bytes = None):
 
     table_name = "stg_order_data"
 
-    # 6) Drop & recreate staging table
-    cur.execute(f"DROP TABLE IF EXISTS {table_name};")
-    
-    cur.execute(f"""
-        CREATE TABLE {table_name} (
-            order_id           TEXT,
-            user_id            TEXT,
-            estimated_arrival  INTEGER,
-            transaction_date   TIMESTAMP
-        );
-    """)
-
-    # 7) Bulk insert using COPY
+    # 3) Bulk insert (APPEND) using COPY
+    # We do NOT drop/create the table. We assume it exists (created by main ingestion script).
     buffer = StringIO()
-    df_all.to_csv(buffer, index=False, header=False)
+    df_new_orders.to_csv(buffer, index=False, header=False)
     buffer.seek(0)
 
     cur.copy_expert(
@@ -225,8 +216,8 @@ def main(new_orders_file: bytes = None):
 
     return {
         "table": table_name,
-        "rows_loaded": len(df_all),
-        "sources_count": len(dfs)
+        "rows_loaded": len(df_new_orders),
+        "note": "Appended to existing table"
     }
 
 if __name__ == "__main__":
