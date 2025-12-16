@@ -10,37 +10,6 @@ import lxml         # for read_html
 import openpyxl     # for read_excel
 
 
-# 🔗 RAW URLs for each file
-URL_2020_H1 = (
-    "https://raw.githubusercontent.com/Quiosh/Datawarehouse-finals/main/"
-    "datasets/Operations%20Department/order_data_20200101-20200701.parquet"
-)
-
-URL_2020_H2 = (
-    "https://raw.githubusercontent.com/Quiosh/Datawarehouse-finals/main/"
-    "datasets/Operations%20Department/order_data_20200701-20211001.pickle"
-)
-
-URL_2021 = (
-    "https://raw.githubusercontent.com/Quiosh/Datawarehouse-finals/main/"
-    "datasets/Operations%20Department/order_data_20211001-20220101.csv"
-)
-
-URL_2022 = (
-    "https://raw.githubusercontent.com/Quiosh/Datawarehouse-finals/main/"
-    "datasets/Operations%20Department/order_data_20220101-20221201.xlsx"
-)
-
-URL_2023_H1 = (
-    "https://raw.githubusercontent.com/Quiosh/Datawarehouse-finals/main/"
-    "datasets/Operations%20Department/order_data_20221201-20230601.json"
-)
-
-URL_2023_H2 = (
-    "https://raw.githubusercontent.com/Quiosh/Datawarehouse-finals/main/"
-    "datasets/Operations%20Department/order_data_20230601-20240101.html"
-)
-
 # Local test file (used as default if no upload is provided)
 URL_TEST_FILE = (
     "https://raw.githubusercontent.com/Quiosh/Datawarehouse-finals/main/"
