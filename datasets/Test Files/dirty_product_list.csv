@@ -1,6 +1,6 @@
 Product_id,Product_name,Product_type,Price
-P-100,Widget,kitchen,12.50
-P-101, Wok ,readymade_breakfast,9.99
+PRODUCT16794,Widget,kitchen,12.50
+PRODUCT61957, Wok ,readymade_breakfast,9.99
 ,MissingIdItem,tools,1.00
-P-103,BadPriceItem,tools,free
-P-INF,InfinityPriceItem,tools,inf
+PRODUCT23890,BadPriceItem,tools,free
+PRODUCT99999,InfinityPriceItem,tools,inf
