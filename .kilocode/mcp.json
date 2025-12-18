@@ -1,1 +1,0 @@
-{"mcpServers":{"postgres":{"command":"postgres-mcp","args":["--access-mode=restricted"],"env":{"DATABASE_URI":"postgres://postgres:shopzada@onlycabsdwh.dev/shopzada?sslmode=disable"},"alwaysAllow":["list_objects","list_schemas"],"disabledTools":["get_object_details"]}}}
