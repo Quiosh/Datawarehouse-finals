@@ -2,14 +2,22 @@
 
 **Project:** Shopzada Data Warehouse (ELT pipeline)
 
-members
+**members**
+
 Dela Cruz, Andre Nathan
+
 Dalomino, Brandon Renz
+
 Gabriel, Elijah Miguel
+
 Galang, Mark Armi
+
 Matienzo, Ian Carl
+
 Repollo, Rob Joachim
+
 Sarvida, Kernel
+
 Villafuerte, Karl
 
 
