@@ -43,7 +43,7 @@ Infrastructure-as-Code and configuration files.
 
 ### `workflows/`
 Configuration for the orchestration engine.
-- **`ingestion_flow_main.json`**: Defines the Windmill workflow that coordinates the execution of ingestion and transformation scripts.
+- Defines the Windmill workflows that coordinates the execution of ingestion and transformation scripts.
 
 ### `dashboard/`
 - Contains artifacts related to the BI Dashboard (e.g., Shopzada Dashboard PDF).
