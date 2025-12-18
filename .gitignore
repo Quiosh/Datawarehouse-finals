@@ -1,2 +1,5 @@
 tmp/kestra-wd/*
 !tmp/kestra-wd/.gitkeep
+CLAUDE.md
+AGENTS.md
+wmill*
