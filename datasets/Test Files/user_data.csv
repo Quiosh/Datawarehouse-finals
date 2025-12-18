@@ -1,0 +1,2 @@
+User_id,Creation_date,Name,Street,State,City,Country,Birthdate,Gender,Device_address,User_type,Possible_duplicate
+USER_TEST_001,2025-12-16 10:00:00,TEST_CUSTOMER_ALPHA,123 Test Lane,TestState,TestCity,TestCountry,1990-01-01,female,00:00:00:00:00:00,basic,False
