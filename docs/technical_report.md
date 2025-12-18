@@ -2,36 +2,16 @@
 
 **Project:** Shopzada Data Warehouse (ELT pipeline)
 
-**Document type:** Technical documentation / report (hybrid business + technical)
+members
+Dela Cruz, Andre Nathan
+Dalomino, Brandon Renz
+Gabriel, Elijah Miguel
+Galang, Mark Armi
+Matienzo, Ian Carl
+Repollo, Rob Joachim
+Sarvida, Kernel
+Villafuerte, Karl
 
-**Version:** 1.0
-
-**Last updated:** 2025-12-16
-
----
-
-## Document control
-
-| Field | Value |
-|---|---|
-| Owner | Data Engineering Team |
-| Reviewers | (Add names) |
-| Status | Draft |
-
-### Export / submission
-
-If you need a PDF submission, a typical approach is to use Pandoc from the repository root:
-
-```bash
-pandoc docs/technical_report.md -o docs/technical_report.pdf
-```
-
-If Mermaid rendering is required in the exported PDF, either:
-
-- Render the Mermaid diagrams separately and embed them as images, or
-- Use a Markdown viewer/toolchain that supports Mermaid during export.
-
----
 
 ## Table of contents
 
