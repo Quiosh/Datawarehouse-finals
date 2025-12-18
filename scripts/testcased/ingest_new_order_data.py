@@ -5,10 +5,11 @@ import re  # Added for regex cleaning
 import requests
 import pandas as pd
 import psycopg2
-import pyarrow      # for parquet
-import lxml         # for read_html
-import openpyxl     # for read_excel
+import pyarrow  # for parquet
+import lxml  # for read_html
+import openpyxl  # for read_excel
 
+# SELECT COUNT(*) FROM fact_orders WHERE date_key = 20240102; to read after state
 
 # Local test file (used as default if no upload is provided)
 URL_TEST_FILE = (
@@ -18,6 +19,7 @@ URL_TEST_FILE = (
 
 
 # ---------- helpers to download + load ----------
+
 
 def _get(url: str) -> requests.Response:
     resp = requests.get(url, timeout=60)
@@ -65,13 +67,14 @@ def _load_local_csv(path: str) -> pd.DataFrame:
 
 # ---------- standardization ----------
 
+
 def _standardize_order_df(df: pd.DataFrame) -> pd.DataFrame:
     """
     Make sure we end up with columns:
       order_id, user_id, estimated_arrival (INTEGER), transaction_date (TIMESTAMP)
     """
     # 1. Drop junk columns like "Unnamed: 0"
-    df = df.loc[:, ~df.columns.str.contains('^Unnamed:', case=False)]
+    df = df.loc[:, ~df.columns.str.contains("^Unnamed:", case=False)]
 
     # 2. Normalize headers
     rename_map = {}
@@ -99,7 +102,9 @@ def _standardize_order_df(df: pd.DataFrame) -> pd.DataFrame:
     # 3. Clean estimated_arrival
     #    "15days" -> 15 (Integer)
     #    Regex strips everything that is NOT a digit
-    df["estimated_arrival"] = df["estimated_arrival"].astype(str).str.replace(r'\D', '', regex=True)
+    df["estimated_arrival"] = (
+        df["estimated_arrival"].astype(str).str.replace(r"\D", "", regex=True)
+    )
     df["estimated_arrival"] = pd.to_numeric(df["estimated_arrival"], errors="coerce")
 
     # 4. Parse transaction_date as timestamp
@@ -110,10 +115,11 @@ def _standardize_order_df(df: pd.DataFrame) -> pd.DataFrame:
 
 # ---------- main ----------
 
+
 def main(new_orders_file: bytes = None):
     """
     Ingest ONLY the new test data and append it to the existing staging table.
-    
+
     Args:
         new_orders_file: File upload from Windmill (passed as bytes).
     """
@@ -138,7 +144,9 @@ def main(new_orders_file: bytes = None):
         try:
             # We use _load_local_csv here since it is a local file path
             df_new_orders = _standardize_order_df(_load_local_csv(URL_TEST_FILE))
-            print(f"Successfully loaded {len(df_new_orders)} rows from default test file.")
+            print(
+                f"Successfully loaded {len(df_new_orders)} rows from default test file."
+            )
         except Exception as e:
             print(f"Could not load default test file: {e}")
             # If no data found, we can just return or raise, but let's proceed with empty df
@@ -186,8 +194,9 @@ def main(new_orders_file: bytes = None):
     return {
         "table": table_name,
         "rows_loaded": len(df_new_orders),
-        "note": "Appended to existing table"
+        "note": "Appended to existing table",
     }
+
 
 if __name__ == "__main__":
     main()
