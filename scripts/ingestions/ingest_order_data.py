@@ -1,6 +1,5 @@
 import io
 from io import StringIO
-import re  # Added for regex cleaning
 
 import requests
 import pandas as pd
@@ -12,36 +11,34 @@ import openpyxl     # for read_excel
 
 # 🔗 RAW URLs for each file
 URL_2020_H1 = (
-    "https://raw.githubusercontent.com/Quiosh/Datawarehouse-finals/main/"
+    "https://raw.githubusercontent.com/Quiosh/dwh_finalproject_3cse_group_4/main/"
     "datasets/Operations%20Department/order_data_20200101-20200701.parquet"
 )
 
 URL_2020_H2 = (
-    "https://raw.githubusercontent.com/Quiosh/Datawarehouse-finals/main/"
+    "https://raw.githubusercontent.com/Quiosh/dwh_finalproject_3cse_group_4/main/"
     "datasets/Operations%20Department/order_data_20200701-20211001.pickle"
 )
 
 URL_2021 = (
-    "https://raw.githubusercontent.com/Quiosh/Datawarehouse-finals/main/"
+    "https://raw.githubusercontent.com/Quiosh/dwh_finalproject_3cse_group_4/main/"
     "datasets/Operations%20Department/order_data_20211001-20220101.csv"
 )
 
 URL_2022 = (
-    "https://raw.githubusercontent.com/Quiosh/Datawarehouse-finals/main/"
+    "https://raw.githubusercontent.com/Quiosh/dwh_finalproject_3cse_group_4/main/"
     "datasets/Operations%20Department/order_data_20220101-20221201.xlsx"
 )
 
 URL_2023_H1 = (
-    "https://raw.githubusercontent.com/Quiosh/Datawarehouse-finals/main/"
+    "https://raw.githubusercontent.com/Quiosh/dwh_finalproject_3cse_group_4/main/"
     "datasets/Operations%20Department/order_data_20221201-20230601.json"
 )
 
 URL_2023_H2 = (
-    "https://raw.githubusercontent.com/Quiosh/Datawarehouse-finals/main/"
+    "https://raw.githubusercontent.com/Quiosh/dwh_finalproject_3cse_group_4/main/"
     "datasets/Operations%20Department/order_data_20230601-20240101.html"
 )
-
-
 # ---------- helpers to download + load ----------
 
 def _get(url: str) -> requests.Response:
@@ -83,27 +80,42 @@ def _load_html(url: str) -> pd.DataFrame:
     return tables[0]
 
 
-# ---------- standardization ----------
+# ---------- standardization + validation ----------
 
 def _standardize_order_df(df: pd.DataFrame) -> pd.DataFrame:
     """
-    Make sure we end up with columns:
+    Ensures output columns:
       order_id, user_id, estimated_arrival (INTEGER), transaction_date (TIMESTAMP)
-    """
-    # 1. Drop junk columns like "Unnamed: 0"
-    df = df.loc[:, ~df.columns.str.contains('^Unnamed:', case=False)]
 
-    # 2. Normalize headers
+    Cleaning rules:
+    - Drop "Unnamed:*" columns
+    - Normalize headers
+    - estimated_arrival: keep digits only ("15days" -> 15), coerce to numeric
+    - transaction_date: parse to datetime
+    - Drop rows that are missing/invalid:
+        order_id, user_id, estimated_arrival, transaction_date
+    """
+    if df is None or df.empty:
+        return pd.DataFrame(columns=["order_id", "user_id", "estimated_arrival", "transaction_date"])
+
+    df = df.copy()
+
+    # 1) Drop junk columns
+    df = df.loc[:, ~df.columns.astype(str).str.contains("^Unnamed:", case=False, regex=True)]
+
+    # 2) Normalize headers
     rename_map = {}
     for col in df.columns:
         lc = str(col).strip().lower()
-        if lc.replace(" ", "_") == "estimated_arrival":
-            rename_map[col] = "estimated_arrival"
-        elif lc == "order_id":
+        lc_norm = lc.replace(" ", "_")
+
+        if lc_norm == "order_id":
             rename_map[col] = "order_id"
-        elif lc == "user_id":
+        elif lc_norm == "user_id":
             rename_map[col] = "user_id"
-        elif lc == "transaction_date":
+        elif lc_norm == "estimated_arrival":
+            rename_map[col] = "estimated_arrival"
+        elif lc_norm == "transaction_date":
             rename_map[col] = "transaction_date"
 
     df = df.rename(columns=rename_map)
@@ -113,71 +125,57 @@ def _standardize_order_df(df: pd.DataFrame) -> pd.DataFrame:
     if missing:
         raise ValueError(f"Missing expected columns {missing}. Got {list(df.columns)}")
 
-    # Keep only required columns, in order
     df = df[required]
 
-    # 3. Clean estimated_arrival
-    #    "15days" -> 15 (Integer)
-    #    Regex strips everything that is NOT a digit
-    df["estimated_arrival"] = df["estimated_arrival"].astype(str).str.replace(r'\D', '', regex=True)
-    df["estimated_arrival"] = pd.to_numeric(df["estimated_arrival"], errors="coerce")
+    # 3) Clean IDs
+    df["order_id"] = df["order_id"].astype(str).str.strip()
+    df["user_id"] = df["user_id"].astype(str).str.strip()
 
-    # 4. Parse transaction_date as timestamp
+    df.loc[df["order_id"].str.lower().isin(["", "nan", "none"]), "order_id"] = None
+    df.loc[df["user_id"].str.lower().isin(["", "nan", "none"]), "user_id"] = None
+
+    # 4) Clean estimated_arrival -> integer
+    arrival_digits = df["estimated_arrival"].astype(str).str.replace(r"\D", "", regex=True)
+    df["estimated_arrival"] = pd.to_numeric(arrival_digits, errors="coerce")
+
+    # 5) Parse transaction_date
     df["transaction_date"] = pd.to_datetime(df["transaction_date"], errors="coerce")
+
+    # Drop invalid rows (no nulls allowed per requirement)
+    invalid_mask = (
+        df["order_id"].isna()
+        | df["user_id"].isna()
+        | df["estimated_arrival"].isna()
+        | df["transaction_date"].isna()
+    )
+    if invalid_mask.any():
+        print(f"Warning: Dropping {int(invalid_mask.sum())} invalid rows during standardization.")
+        df = df.loc[~invalid_mask].copy()
+
+    # Ensure integer type for Postgres INTEGER
+    df["estimated_arrival"] = df["estimated_arrival"].astype("int64")
+
+    # Deduplicate inside slice (extra safety)
+    df = df.drop_duplicates()
 
     return df
 
 
-# ---------- main ----------
+# ---------- postgres helpers ----------
 
-def main():
-    # 1) Load each slice
-    df_2020_h1 = _standardize_order_df(_load_parquet(URL_2020_H1))
-    df_2020_h2 = _standardize_order_df(_load_pickle(URL_2020_H2))
-    df_2021    = _standardize_order_df(_load_csv(URL_2021))
-    df_2022    = _standardize_order_df(_load_xlsx(URL_2022))
-    df_2023_h1 = _standardize_order_df(_load_json(URL_2023_H1))
-    df_2023_h2 = _standardize_order_df(_load_html(URL_2023_H2))
-
-    # 2) Combine into one big DataFrame
-    df_all = pd.concat(
-        [df_2020_h1, df_2020_h2, df_2021, df_2022, df_2023_h1, df_2023_h2],
-        ignore_index=True,
-        sort=False,
-    )
-
-    # 3) Safety Deduplication
-    #    Remove rows that might overlap between files
-    df_all = df_all.drop_duplicates()
-
-    # 4) Connect to Postgres
-    conn = psycopg2.connect(
+def _connect():
+    return psycopg2.connect(
         host="db",
         port=5432,
         user="postgres",
         password="shopzada",
         dbname="shopzada",
     )
-    cur = conn.cursor()
 
-    table_name = "stg_order_data"
 
-    # 5) Drop & recreate staging table
-    cur.execute(f"DROP TABLE IF EXISTS {table_name};")
-    
-    # Changed estimated_arrival to INTEGER
-    cur.execute(f"""
-        CREATE TABLE {table_name} (
-            order_id           TEXT,
-            user_id            TEXT,
-            estimated_arrival  INTEGER,
-            transaction_date   TIMESTAMP
-        );
-    """)
-
-    # 6) Bulk insert using COPY
+def _copy_df(cur, table_name: str, df: pd.DataFrame):
     buffer = StringIO()
-    df_all.to_csv(buffer, index=False, header=False)
+    df.to_csv(buffer, index=False, header=False)
     buffer.seek(0)
 
     cur.copy_expert(
@@ -193,15 +191,62 @@ def main():
         buffer,
     )
 
+
+# ---------- main ----------
+
+def main():
+    print("⏳ Loading historical data slices...")
+
+    df_2020_h1 = _standardize_order_df(_load_parquet(URL_2020_H1))
+    df_2020_h2 = _standardize_order_df(_load_pickle(URL_2020_H2))
+    df_2021    = _standardize_order_df(_load_csv(URL_2021))
+    df_2022    = _standardize_order_df(_load_xlsx(URL_2022))
+    df_2023_h1 = _standardize_order_df(_load_json(URL_2023_H1))
+    df_2023_h2 = _standardize_order_df(_load_html(URL_2023_H2))
+
+    print("🔗 Combining and deduplicating...")
+    df_all = pd.concat(
+        [df_2020_h1, df_2020_h2, df_2021, df_2022, df_2023_h1, df_2023_h2],
+        ignore_index=True,
+        sort=False,
+    ).drop_duplicates()
+
+    table_name = "stg_order_data"
+
+    print("🗄️ Loading into Postgres (full refresh)...")
+    conn = _connect()
+    cur = conn.cursor()
+
+    cur.execute(f"DROP TABLE IF EXISTS {table_name};")
+    cur.execute(
+        f"""
+        CREATE TABLE {table_name} (
+            order_id           TEXT,
+            user_id            TEXT,
+            estimated_arrival  INTEGER,
+            transaction_date   TIMESTAMP
+        );
+        """
+    )
+
+    if not df_all.empty:
+        _copy_df(cur, table_name, df_all)
+
     conn.commit()
     cur.close()
     conn.close()
 
+    print(f"✅ Loaded {len(df_all)} rows into {table_name}.")
+
     return {
         "table": table_name,
-        "rows_loaded": len(df_all),
+        "rows_loaded": int(len(df_all)),
         "sources": [
             URL_2020_H1, URL_2020_H2, URL_2021,
             URL_2022, URL_2023_H1, URL_2023_H2,
         ],
     }
+
+
+if __name__ == "__main__":
+    main()

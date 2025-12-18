@@ -64,6 +64,13 @@ def clean_dataframe(df: pd.DataFrame) -> pd.DataFrame:
     if missing:
         raise ValueError(f"DataFrame missing expected columns: {missing}")
 
+    # 4. Filter out rows with missing critical IDs
+    missing_id_mask = df["order_id"].isna() | (df["order_id"] == "") | df["product_id"].isna() | (df["product_id"] == "")
+    if missing_id_mask.any():
+        dropped_count = missing_id_mask.sum()
+        print(f"Warning: Dropping {dropped_count} rows with missing 'order_id' or 'product_id'.")
+        df = df[~missing_id_mask]
+
     return df[required]
 
 

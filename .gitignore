@@ -3,3 +3,4 @@ tmp/kestra-wd/*
 CLAUDE.md
 AGENTS.md
 wmill*
+.kilocode/

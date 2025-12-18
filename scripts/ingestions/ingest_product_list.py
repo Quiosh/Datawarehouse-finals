@@ -52,6 +52,13 @@ def main():
     # 5. Clean Price
     if "price" in df.columns:
         df["price"] = pd.to_numeric(df["price"], errors="coerce")
+        
+        # Filter out invalid prices (NaN after coercion)
+        # Assuming price is required.
+        invalid_price_rows = df["price"].isna()
+        if invalid_price_rows.any():
+            print(f"Warning: Dropping {invalid_price_rows.sum()} rows with invalid or missing 'price'.")
+            df = df[~invalid_price_rows]
 
     # 6. Safety Deduplication
     df = df.drop_duplicates()
@@ -66,6 +73,13 @@ def main():
             f"Missing expected columns in file: {missing}. "
             f"Available columns: {list(df.columns)}"
         )
+
+    # 7. Filter out rows with missing critical IDs (product_id)
+    missing_id_mask = df["product_id"].isna() | (df["product_id"] == "")
+    if missing_id_mask.any():
+        dropped_count = missing_id_mask.sum()
+        print(f"Warning: Dropping {dropped_count} rows with missing 'product_id'.")
+        df = df[~missing_id_mask]
 
     # 3) Connect directly to Postgres
     conn = psycopg2.connect(
