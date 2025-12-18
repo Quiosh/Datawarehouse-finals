@@ -138,6 +138,22 @@ def _standardize_order_df(df: pd.DataFrame) -> pd.DataFrame:
     arrival_digits = df["estimated_arrival"].astype(str).str.replace(r"\D", "", regex=True)
     df["estimated_arrival"] = pd.to_numeric(arrival_digits, errors="coerce")
 
+    # Disallow +/-Infinity explicitly
+    inf_arrival_mask = df["estimated_arrival"].isin([float("inf"), float("-inf")])
+    if inf_arrival_mask.any():
+        print(
+            f"Warning: Dropping {int(inf_arrival_mask.sum())} rows with infinite estimated_arrival (inf/-inf not allowed)."
+        )
+        df.loc[inf_arrival_mask, "estimated_arrival"] = pd.NA
+
+    # Prevent Postgres INTEGER overflow (max 2,147,483,647)
+    too_large_arrival_mask = df["estimated_arrival"] > 2147483647
+    if too_large_arrival_mask.any():
+        print(
+            f"Warning: Dropping {int(too_large_arrival_mask.sum())} rows with out-of-range estimated_arrival (> 2147483647)."
+        )
+        df.loc[too_large_arrival_mask, "estimated_arrival"] = pd.NA
+
     # 5) Parse transaction_date
     df["transaction_date"] = pd.to_datetime(df["transaction_date"], errors="coerce")
 

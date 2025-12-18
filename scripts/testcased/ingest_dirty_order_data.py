@@ -34,13 +34,32 @@ def main():
     
     # 1. Clean Estimated Arrival
     #    Remove non-digits, coerce to numeric, drop invalid
-    df["Estimated_arrival"] = df["Estimated_arrival"].astype(str).str.replace(r'\D', '', regex=True)
+    df["Estimated_arrival"] = df["Estimated_arrival"].astype(str).str.replace(r"\D", "", regex=True)
     df["Estimated_arrival"] = pd.to_numeric(df["Estimated_arrival"], errors="coerce")
-    
+
+    # Disallow +/-Infinity explicitly
+    inf_arrival_rows = df["Estimated_arrival"].isin([float("inf"), float("-inf")])
+    if inf_arrival_rows.any():
+        print(
+            f"Warning: Dropping {int(inf_arrival_rows.sum())} rows with infinite 'Estimated_arrival' (inf/-inf not allowed)."
+        )
+        df = df[~inf_arrival_rows]
+
     invalid_arrival_rows = df["Estimated_arrival"].isna()
     if invalid_arrival_rows.any():
-        print(f"Warning: Dropping {invalid_arrival_rows.sum()} rows with invalid 'Estimated_arrival'.")
+        print(f"Warning: Dropping {int(invalid_arrival_rows.sum())} rows with invalid 'Estimated_arrival'.")
         df = df[~invalid_arrival_rows]
+
+    # Prevent Postgres INTEGER overflow (max 2,147,483,647)
+    too_large_arrival_rows = df["Estimated_arrival"] > 2147483647
+    if too_large_arrival_rows.any():
+        print(
+            f"Warning: Dropping {int(too_large_arrival_rows.sum())} rows with out-of-range 'Estimated_arrival' (> 2147483647)."
+        )
+        df = df[~too_large_arrival_rows]
+
+    # Ensure integer type
+    df["Estimated_arrival"] = df["Estimated_arrival"].astype("int64")
 
     # 2. Clean Transaction Date
     #    Coerce to datetime, drop invalid
@@ -51,12 +70,18 @@ def main():
          print(f"Warning: Dropping {invalid_date_rows.sum()} rows with invalid or missing 'Transaction_date'.")
          df = df[~invalid_date_rows]
 
-    # 3. Filter out rows with missing critical IDs (Order_id)
-    missing_id_mask = df["Order_id"].isna() | (df["Order_id"] == "")
-    if missing_id_mask.any():
-        dropped_count = missing_id_mask.sum()
+    # 3. Filter out rows with missing critical IDs (Order_id, User_id)
+    missing_order_id_mask = df["Order_id"].isna() | (df["Order_id"] == "")
+    if missing_order_id_mask.any():
+        dropped_count = int(missing_order_id_mask.sum())
         print(f"Warning: Dropping {dropped_count} rows with missing 'Order_id'.")
-        df = df[~missing_id_mask]
+        df = df[~missing_order_id_mask]
+
+    missing_user_id_mask = df["User_id"].isna() | (df["User_id"] == "")
+    if missing_user_id_mask.any():
+        dropped_count = int(missing_user_id_mask.sum())
+        print(f"Warning: Dropping {dropped_count} rows with missing 'User_id'.")
+        df = df[~missing_user_id_mask]
 
     conn = get_db_connection()
     cur = conn.cursor()

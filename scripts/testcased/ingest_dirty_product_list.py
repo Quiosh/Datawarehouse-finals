@@ -35,7 +35,13 @@ def main():
     # 1. Clean Price
     #    Coerce to numeric, drop invalid
     df["Price"] = pd.to_numeric(df["Price"], errors="coerce")
-    
+
+    # Disallow +/-Infinity explicitly (e.g., values like 'inf', 'Infinity', '-inf')
+    inf_price_rows = df["Price"].isin([float("inf"), float("-inf")])
+    if inf_price_rows.any():
+        print(f"Warning: Dropping {inf_price_rows.sum()} rows with infinite 'Price' (inf/-inf not allowed).")
+        df = df[~inf_price_rows]
+
     invalid_price_rows = df["Price"].isna()
     if invalid_price_rows.any():
         print(f"Warning: Dropping {invalid_price_rows.sum()} rows with invalid or missing 'Price'.")
