@@ -1,0 +1,5 @@
+Product_id,Product_name,Product_type,Price
+PRODUCT_TEST_001,TEST_PRODUCT_ZETA,Test Gadget,20.0
+PRODUCT_TEST_002,TEST_PRODUCT_INVALID_PRICE,Test Gadget,free
+,TEST_PRODUCT_MISSING_ID,Test Gadget,100.0
+PRODUCT_TEST_003,,Test Gadget,50.0
