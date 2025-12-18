@@ -28,6 +28,7 @@ Contains the Python scripts responsible for the ELT process.
 - **`ingestions/`**: Scripts that extract raw data from `datasets/` and load it into the staging area of the data warehouse.
 - **`tranforms/`**: Scripts that transform the staged data into the final Dimensional Model (Star Schema), creating Dimension (`DIM_*`) and Fact (`FACT_*`) tables.
 - **`testcased/`**: Scripts specifically designed for ingesting test cases (dirty or late data).
+- **`clean/`**: Scripts used for testing and validating data cleaning and transformation logic.
 
 ### `docs/`
 Project documentation.
