@@ -9,17 +9,17 @@ from io import BytesIO
 
 # 🔗 Raw URLs for the three Operations Department *products* files
 URL_PROD_1 = (
-    "https://raw.githubusercontent.com/Quiosh/Datawarehouse-finals/main/"
+    "https://raw.githubusercontent.com/Quiosh/dwh_finalproject_3cse_group_4/main/"
     "datasets/Operations%20Department/line_item_data_products1.csv"
 )
 
 URL_PROD_2 = (
-    "https://raw.githubusercontent.com/Quiosh/Datawarehouse-finals/main/"
+    "https://raw.githubusercontent.com/Quiosh/dwh_finalproject_3cse_group_4/main/"
     "datasets/Operations%20Department/line_item_data_products2.csv"
 )
 
 URL_PROD_3 = (
-    "https://raw.githubusercontent.com/Quiosh/Datawarehouse-finals/main/"
+    "https://raw.githubusercontent.com/Quiosh/dwh_finalproject_3cse_group_4/main/"
     "datasets/Operations%20Department/line_item_data_products3.parquet"
 )
 
