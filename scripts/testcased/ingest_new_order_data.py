@@ -13,7 +13,7 @@ import openpyxl  # for read_excel
 
 # Local test file (used as default if no upload is provided)
 URL_TEST_FILE = (
-    "https://raw.githubusercontent.com/Quiosh/Datawarehouse-finals/main/"
+    "https://raw.githubusercontent.com/Quiosh/dwh_finalproject_3cse_group_4/main/"
     "datasets/Test%20Files/new_orders.csv"
 )
 
