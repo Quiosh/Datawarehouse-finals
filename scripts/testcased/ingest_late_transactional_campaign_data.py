@@ -11,10 +11,12 @@ URL_LATE_LINKS_FILE = (
 )
 # ---------- helpers ----------
 
+
 def _get(url: str) -> requests.Response:
     resp = requests.get(url, timeout=30)
     resp.raise_for_status()
     return resp
+
 
 def _standardize_links_df(df: pd.DataFrame) -> pd.DataFrame:
     """
@@ -40,8 +42,14 @@ def _standardize_links_df(df: pd.DataFrame) -> pd.DataFrame:
     df = df.rename(columns=rename_map)
 
     # 2. Ensure ALL Target Columns Exist
-    required_cols = ["transaction_date", "campaign_id", "order_id", "estimated_arrival", "availed"]
-    
+    required_cols = [
+        "transaction_date",
+        "campaign_id",
+        "order_id",
+        "estimated_arrival",
+        "availed",
+    ]
+
     for col in required_cols:
         if col not in df.columns:
             # Fill missing columns with None (NULL in Postgres)
@@ -50,17 +58,25 @@ def _standardize_links_df(df: pd.DataFrame) -> pd.DataFrame:
     # 3. Clean specific columns if they exist
     if "estimated_arrival" in df.columns:
         # Remove "days" text, keep numbers
-        df["estimated_arrival"] = df["estimated_arrival"].astype(str).str.replace(r'\D', '', regex=True)
-        df["estimated_arrival"] = pd.to_numeric(df["estimated_arrival"], errors="coerce")
+        df["estimated_arrival"] = (
+            df["estimated_arrival"].astype(str).str.replace(r"\D", "", regex=True)
+        )
+        df["estimated_arrival"] = pd.to_numeric(
+            df["estimated_arrival"], errors="coerce"
+        )
 
     if "transaction_date" in df.columns:
         # Ensure it is a valid date string
         if not df["transaction_date"].isna().all():
-            df["transaction_date"] = pd.to_datetime(df["transaction_date"], errors="coerce").dt.date
+            df["transaction_date"] = pd.to_datetime(
+                df["transaction_date"], errors="coerce"
+            ).dt.date
 
     if "availed" in df.columns:
         # Ensure 1/0 integer
-        df["availed"] = pd.to_numeric(df["availed"], errors="coerce").fillna(0).astype(int)
+        df["availed"] = (
+            pd.to_numeric(df["availed"], errors="coerce").fillna(0).astype(int)
+        )
 
     # 4. Clean IDs (Strip whitespace)
     if "order_id" in df.columns:
@@ -74,14 +90,15 @@ def _standardize_links_df(df: pd.DataFrame) -> pd.DataFrame:
 
 # ---------- main ----------
 
+
 def main(new_links_file: bytes = None):
     """
     Ingest ONLY the late links data and APPEND it to stg_transactional_campaign_data.
-    
+
     Args:
         new_links_file: File upload from Windmill (passed as bytes).
     """
-    
+
     df_new_links = pd.DataFrame()
 
     # 1) Load Data (Upload OR URL Fallback)
@@ -123,7 +140,7 @@ def main(new_links_file: bytes = None):
 
     # 3) Bulk Insert (APPEND ONLY)
     buffer = StringIO()
-    # Write to buffer 
+    # Write to buffer
     df_new_links.to_csv(buffer, index=False, header=False)
     buffer.seek(0)
 
@@ -143,7 +160,7 @@ def main(new_links_file: bytes = None):
         )
         conn.commit()
         print(f"Successfully appended {len(df_new_links)} rows to {table_name}.")
-        
+
     except Exception as e:
         conn.rollback()
         print(f"Database error: {e}")
@@ -155,8 +172,9 @@ def main(new_links_file: bytes = None):
     return {
         "table": table_name,
         "rows_appended": len(df_new_links),
-        "status": "Success"
+        "status": "Success",
     }
+
 
 if __name__ == "__main__":
     main()

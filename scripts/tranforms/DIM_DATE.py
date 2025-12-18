@@ -6,6 +6,7 @@ logging.basicConfig(
     level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s"
 )
 
+
 def main():
     conn = psycopg2.connect(
         host="db",
@@ -70,17 +71,18 @@ def main():
 
         if batch_data:
             cur.executemany(insert_query, batch_data)
-            logging.info(f"DIM_DATE refreshed. Inserted {len(batch_data)} rows.")
+            logging.info(f"✅ DIM_DATE refreshed. Inserted {len(batch_data)} rows.")
 
         conn.commit()
 
     except Exception as e:
         conn.rollback()
-        logging.error(f"DIM_DATE failed: {e}")
+        logging.error(f"❌ DIM_DATE failed: {e}")
         raise
     finally:
         cur.close()
         conn.close()
+
 
 if __name__ == "__main__":
     main()

@@ -1,0 +1,324 @@
+summary: ''
+description: ''
+value:
+  modules:
+    - id: prod_ingestion
+      summary: ''
+      value:
+        type: branchall
+        branches:
+          - summary: ''
+            modules:
+              - id: b
+                value:
+                  type: script
+                  input_transforms: {}
+                  is_trigger: false
+                  path: f/ingestion/ingest_product_list
+              - id: c
+                value:
+                  type: script
+                  input_transforms:
+                    new_links_file:
+                      type: static
+                  is_trigger: false
+                  path: f/ingestion/ingest_transactional_campaign_data
+            expr: 'false'
+            parallel: true
+            skip_failure: false
+          - summary: ''
+            modules:
+              - id: a
+                value:
+                  type: script
+                  input_transforms: {}
+                  is_trigger: false
+                  path: f/ingestion/ingest_user_credit_card
+                continue_on_error: false
+              - id: l
+                value:
+                  type: script
+                  input_transforms: {}
+                  is_trigger: false
+                  path: f/ingestion/ingest_staff_data
+              - id: r
+                value:
+                  type: script
+                  input_transforms: {}
+                  is_trigger: false
+                  path: f/ingestion/ingest_merchant_data
+            expr: 'false'
+            parallel: true
+            skip_failure: false
+          - summary: ''
+            modules:
+              - id: e
+                value:
+                  type: script
+                  input_transforms: {}
+                  is_trigger: false
+                  path: f/ingestion/ingest_line_item_data_products
+              - id: d
+                value:
+                  type: script
+                  input_transforms: {}
+                  is_trigger: false
+                  path: f/ingestion/ingest_line_item_data_prices
+              - id: m
+                value:
+                  type: script
+                  input_transforms: {}
+                  is_trigger: false
+                  path: f/ingestion/ingest_user_data
+            expr: 'false'
+            parallel: true
+            skip_failure: false
+          - summary: ''
+            modules:
+              - id: f
+                value:
+                  type: script
+                  input_transforms:
+                    new_orders_file:
+                      type: static
+                    use_fallback_test_file:
+                      type: static
+                  is_trigger: false
+                  path: f/ingestion/ingest_order_data
+              - id: j
+                value:
+                  type: script
+                  input_transforms:
+                    new_campaign_file:
+                      type: static
+                  is_trigger: false
+                  path: f/ingestion/ingest_campaign_data
+              - id: 'n'
+                value:
+                  type: script
+                  input_transforms: {}
+                  is_trigger: false
+                  path: f/ingestion/ingest_user_job
+            expr: 'false'
+            parallel: true
+            skip_failure: false
+          - summary: ''
+            modules:
+              - id: i
+                value:
+                  type: script
+                  input_transforms: {}
+                  is_trigger: false
+                  path: f/ingestion/ingest_order_with_merchant_data
+              - id: g
+                value:
+                  type: script
+                  input_transforms: {}
+                  is_trigger: false
+                  path: f/ingestion/ingest_order_delays
+            expr: 'false'
+            parallel: true
+            skip_failure: false
+        parallel: true
+    - id: test_injection
+      summary: ''
+      value:
+        type: branchall
+        branches:
+          - summary: ''
+            modules:
+              - id: ti_1
+                value:
+                  type: script
+                  input_transforms:
+                    file_bytes:
+                      type: javascript
+                      expr: flow_input.product_list_csv
+                  is_trigger: false
+                  path: u/karl/ingest_test_product_list
+              - id: ti_2
+                value:
+                  type: script
+                  input_transforms:
+                    file_bytes:
+                      type: javascript
+                      expr: flow_input.user_data_csv
+                  is_trigger: false
+                  path: u/karl/ingest_test_user_data
+            expr: 'false'
+            parallel: true
+            skip_failure: false
+          - summary: ''
+            modules:
+              - id: ti_3
+                value:
+                  type: script
+                  input_transforms:
+                    file_bytes:
+                      type: javascript
+                      expr: flow_input.user_job_csv
+                  is_trigger: false
+                  path: u/karl/ingest_test_user_job
+              - id: ti_4
+                value:
+                  type: script
+                  input_transforms:
+                    file_bytes:
+                      type: javascript
+                      expr: flow_input.order_data_csv
+                  is_trigger: false
+                  path: u/karl/ingest_test_order_data
+            expr: 'false'
+            parallel: true
+            skip_failure: false
+          - summary: ''
+            modules:
+              - id: ad
+                value:
+                  type: script
+                  input_transforms:
+                    file_bytes:
+                      type: static
+                  is_trigger: false
+                  path: u/karl/ingest__test_order_with_merchant_data
+              - id: ae
+                value:
+                  type: script
+                  input_transforms:
+                    file_bytes:
+                      type: static
+                  is_trigger: false
+                  path: u/karl/ingest_test_line_item_data_products
+              - id: af
+                value:
+                  type: script
+                  input_transforms:
+                    file_bytes:
+                      type: static
+                  is_trigger: false
+                  path: u/karl/ingest_test_line_item_data_prices
+            expr: 'false'
+            parallel: true
+            skip_failure: false
+        parallel: true
+    - id: ag
+      value:
+        type: script
+        input_transforms: {}
+        is_trigger: false
+        path: f/clean/testing_cleaning_data_script
+    - id: u
+      summary: ''
+      value:
+        type: branchall
+        branches:
+          - summary: ''
+            modules:
+              - id: t
+                value:
+                  type: script
+                  input_transforms: {}
+                  is_trigger: false
+                  path: f/transformers/DIM_MERCHANT
+              - id: x
+                value:
+                  type: script
+                  input_transforms: {}
+                  is_trigger: false
+                  path: f/transformers/DIM_DATE
+            expr: 'false'
+            parallel: true
+            skip_failure: false
+          - summary: ''
+            modules:
+              - id: w
+                value:
+                  type: script
+                  input_transforms: {}
+                  is_trigger: false
+                  path: f/transformers/DIM_PRODUCT
+              - id: 'y'
+                value:
+                  type: script
+                  input_transforms: {}
+                  is_trigger: false
+                  path: f/transformers/DIM_STAFF
+            expr: 'false'
+            parallel: true
+            skip_failure: false
+          - summary: ''
+            modules:
+              - id: v
+                value:
+                  type: script
+                  input_transforms: {}
+                  is_trigger: false
+                  path: f/transformers/DIM_USER
+              - id: z
+                value:
+                  type: script
+                  input_transforms: {}
+                  is_trigger: false
+                  path: f/transformers/DIM_CAMPAIGN
+            expr: 'false'
+            parallel: true
+            skip_failure: false
+        parallel: true
+    - id: aa
+      value:
+        type: script
+        input_transforms: {}
+        is_trigger: false
+        path: f/transformers/FACT_ORDERS
+    - id: ac
+      value:
+        type: script
+        input_transforms: {}
+        is_trigger: false
+        path: f/transformers/FACT_ORDER_ITEMS
+    - id: ab
+      value:
+        type: script
+        input_transforms: {}
+        is_trigger: false
+        path: f/transformers/FACT_CAMPAIGN_PERFORMANCE
+schema:
+  $schema: 'https://json-schema.org/draft/2020-12/schema'
+  type: object
+  properties:
+    line_items_price_csv:
+      type: string
+      description: 'Optional: Upload line_item_data_prices.csv for Test Scenario'
+      default: null
+      format: bytes
+    line_items_prod_csv:
+      type: string
+      description: 'Optional: Upload line_item_data_products.csv for Test Scenario'
+      default: null
+      format: bytes
+    order_data_csv:
+      type: string
+      description: 'Optional: Upload order_data.csv for Test Scenario'
+      default: null
+      format: bytes
+    order_merchant_csv:
+      type: string
+      description: 'Optional: Upload order_with_merchant_data.csv for Test Scenario'
+      default: null
+      format: bytes
+    product_list_csv:
+      type: string
+      description: 'Optional: Upload product_list.csv for Test Scenario'
+      default: null
+      format: bytes
+    user_data_csv:
+      type: string
+      description: 'Optional: Upload user_data.csv for Test Scenario'
+      default: null
+      format: bytes
+    user_job_csv:
+      type: string
+      description: 'Optional: Upload user_job.csv for Test Scenario'
+      default: null
+      format: bytes
+  required: []

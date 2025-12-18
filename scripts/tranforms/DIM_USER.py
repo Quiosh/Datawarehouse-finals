@@ -7,6 +7,7 @@ logging.basicConfig(
 
 
 def main():
+    # 1) Connect to Postgres
     conn = psycopg2.connect(
         host="db",
         port=5432,
@@ -19,6 +20,7 @@ def main():
     try:
         logging.info("Starting DIM_USER enrichment...")
 
+        # Remove columns not present in schema
         drop_cols_query = """
             ALTER TABLE dim_user 
             DROP COLUMN IF EXISTS creation_date,
@@ -28,6 +30,7 @@ def main():
         """
         cur.execute(drop_cols_query)
 
+        # 2) Add Missing Columns
         columns_to_add = [
             "birthdate DATE",
             "gender TEXT",
@@ -41,6 +44,7 @@ def main():
         for col in columns_to_add:
             cur.execute(f"ALTER TABLE dim_user ADD COLUMN IF NOT EXISTS {col};")
 
+        # 3) Update Demographics (From stg_user_data)
         logging.info("Updating User Demographics...")
         cur.execute("""
             UPDATE dim_user d
@@ -55,6 +59,7 @@ def main():
             WHERE d.source_user_id = s.user_id;
         """)
 
+        # 4) Update Jobs (From stg_user_job)
         logging.info("Updating User Jobs...")
         cur.execute("""
             UPDATE dim_user d
@@ -75,6 +80,3 @@ def main():
     finally:
         cur.close()
         conn.close()
-
-if __name__ == "__main__":
-    main()

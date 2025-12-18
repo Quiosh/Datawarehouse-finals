@@ -6,7 +6,7 @@ import psycopg2
 from io import StringIO
 
 # ✅ CORRECT raw base
-GITHUB_DATA_BASE = "https://raw.githubusercontent.com/Quiosh/Datawarehouse-finals/main/datasets"
+GITHUB_DATA_BASE = "https://raw.githubusercontent.com/Quiosh/dwh_finalproject_3cse_group_4/main/datasets"
 
 
 def main():

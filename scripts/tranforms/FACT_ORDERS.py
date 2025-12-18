@@ -7,6 +7,7 @@ logging.basicConfig(
 
 
 def main():
+    # 1) Connect to Postgres
     conn = psycopg2.connect(
         host="db",
         port=5432,
@@ -19,6 +20,7 @@ def main():
     try:
         logging.info("Starting FACT_ORDERS processing...")
 
+        # 2) Create Table
         cur.execute("""
             CREATE TABLE IF NOT EXISTS fact_orders (
                 order_key BIGSERIAL PRIMARY KEY,
@@ -38,10 +40,13 @@ def main():
             );
         """)
 
+        # 3) Clear Table
         cur.execute("TRUNCATE TABLE fact_orders CASCADE;")
 
+        # 4) Load Data
         logging.info("Inserting data into fact_orders...")
 
+        # UPDATED QUERY: Removed 'AND is_current = TRUE' for User, Merchant, and Staff
         cur.execute("""
             INSERT INTO fact_orders (
                 order_id, user_key, merchant_key, staff_key, campaign_key, date_key, delay_in_days, total_amount
@@ -77,6 +82,7 @@ def main():
     finally:
         cur.close()
         conn.close()
+
 
 if __name__ == "__main__":
     main()

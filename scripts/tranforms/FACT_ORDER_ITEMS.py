@@ -7,6 +7,7 @@ logging.basicConfig(
 
 
 def main():
+    # 1) Connect to Postgres
     conn = psycopg2.connect(
         host="db",
         port=5432,
@@ -19,6 +20,7 @@ def main():
     try:
         logging.info("Starting FACT_ORDER_ITEMS processing...")
 
+        # 2) Create Table
         cur.execute("""
             CREATE TABLE IF NOT EXISTS fact_order_items (
                 order_item_key BIGSERIAL PRIMARY KEY,
@@ -39,8 +41,10 @@ def main():
             );
         """)
 
+        # 3) Clear Table
         cur.execute("TRUNCATE TABLE fact_order_items CASCADE;")
 
+        # 4) Load Data
         logging.info("Inserting data into fact_order_items...")
         cur.execute("""
             INSERT INTO fact_order_items (
@@ -79,6 +83,7 @@ def main():
 
         logging.info(f"Inserted {cur.rowcount} line items.")
 
+        # 5) Update Header Totals
         logging.info("Updating total_amount in FACT_ORDERS...")
         cur.execute("""
             UPDATE fact_orders fo
@@ -101,6 +106,3 @@ def main():
     finally:
         cur.close()
         conn.close()
-
-if __name__ == "__main__":
-    main()

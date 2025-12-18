@@ -16,6 +16,8 @@ def main():
 
         # ==============================================================================
         # STEP 0: ENSURE DIMENSION + COLUMNS EXIST
+        # - dim_user: holds surrogate key (user_key) + history
+        # - Add user_key columns to staging tables (if not yet present)
         # ==============================================================================
 
         print("0. Ensuring dim_user and user_key columns exist...")
@@ -59,6 +61,7 @@ def main():
 
         # ==============================================================================
         # STEP 1: BUILD USER VERSIONS (VALID_FROM / VALID_TO)
+        # From stg_user_data, define history windows for each source_user_id
         # ==============================================================================
 
         print("1. Building user version windows from stg_user_data...")
@@ -81,11 +84,13 @@ def main():
 
         # ==============================================================================
         # STEP 2: INSERT/UPDATE dim_user
-        #  🔧 FIX: Do NOT insert if same (source_user_id + name) already exists
+        # Insert new versions into dim_user (do not duplicate if re-run)
         # ==============================================================================
 
-        print("2. Inserting new user versions into dim_user (skip existing by name)...")
+        print("2. Inserting new user versions into dim_user...")
 
+        # Insert only rows that are not already in dim_user
+        # We match by (source_user_id, creation_date) as a unique version
         cur.execute("""
             INSERT INTO dim_user (
                 source_user_id,
@@ -103,15 +108,13 @@ def main():
                 v.valid_to,
                 CASE WHEN v.valid_to IS NULL THEN TRUE ELSE FALSE END AS is_current
             FROM temp_user_versions v
-            WHERE NOT EXISTS (
-                SELECT 1
-                FROM dim_user d
-                WHERE d.source_user_id = v.source_user_id
-                  AND d.name = v.name
-            );
+            LEFT JOIN dim_user d
+              ON d.source_user_id = v.source_user_id
+             AND d.creation_date = v.creation_date
+            WHERE d.user_key IS NULL;
         """)
 
-        # Optional: refresh is_current flags
+        # Optional: refresh is_current flags if needed
         cur.execute("""
             UPDATE dim_user d
             SET is_current = (d.valid_to IS NULL);
@@ -119,7 +122,7 @@ def main():
 
         # ==============================================================================
         # STEP 3: BUILD MAPPING (BUSINESS KEY -> SURROGATE KEY)
-        #  🔧 FIX: Map using (user_id + name), not creation_date
+        # temp_user_remapping: from staging rows to dim_user.user_key
         # ==============================================================================
 
         print("3. Building mapping from stg_user_data to dim_user.user_key...")
@@ -138,14 +141,15 @@ def main():
             FROM stg_user_data u
             JOIN dim_user d
               ON d.source_user_id = u.user_id
-             AND d.name = u.name;
-
+             AND d.creation_date = u.creation_date;
+            
             CREATE INDEX idx_remap_orig ON temp_user_remapping(original_user_id);
             CREATE INDEX idx_remap_name ON temp_user_remapping(name);
         """)
 
         # ==============================================================================
         # STEP 4: UPDATE STAGING TABLES WITH SURROGATE KEY
+        # We now fill user_key everywhere, leaving user_id as the business key
         # ==============================================================================
 
         print("4A. Updating stg_user_data (set user_key, clear duplicates)...")
@@ -153,7 +157,7 @@ def main():
         cur.execute("""
             UPDATE stg_user_data u
             SET user_key = m.user_key,
-                possible_duplicate = FALSE
+                possible_duplicate = FALSE   -- they are now uniquely identified
             FROM temp_user_remapping m
             WHERE u.user_id = m.original_user_id
               AND u.creation_date = m.creation_date;

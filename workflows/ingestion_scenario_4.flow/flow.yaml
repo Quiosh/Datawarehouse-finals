@@ -1,0 +1,223 @@
+summary: ''
+description: ''
+value:
+  modules:
+    - id: p
+      summary: ''
+      value:
+        type: branchall
+        branches:
+          - summary: ''
+            modules:
+              - id: b
+                value:
+                  type: script
+                  input_transforms: {}
+                  is_trigger: false
+                  path: f/ingestion/ingest_product_list
+              - id: ae
+                value:
+                  type: script
+                  input_transforms: {}
+                  is_trigger: false
+                  path: f/test_case/ingest_dirty_product_list
+              - id: c
+                value:
+                  type: script
+                  input_transforms:
+                    new_links_file:
+                      type: static
+                  is_trigger: false
+                  path: f/ingestion/ingest_transactional_campaign_data
+            expr: 'false'
+            parallel: true
+            skip_failure: false
+          - summary: ''
+            modules:
+              - id: a
+                value:
+                  type: script
+                  input_transforms: {}
+                  is_trigger: false
+                  path: f/ingestion/ingest_user_credit_card
+                continue_on_error: false
+              - id: l
+                value:
+                  type: script
+                  input_transforms: {}
+                  is_trigger: false
+                  path: f/ingestion/ingest_staff_data
+              - id: r
+                value:
+                  type: script
+                  input_transforms: {}
+                  is_trigger: false
+                  path: f/ingestion/ingest_merchant_data
+            expr: 'false'
+            parallel: true
+            skip_failure: false
+          - summary: ''
+            modules:
+              - id: e
+                value:
+                  type: script
+                  input_transforms: {}
+                  is_trigger: false
+                  path: f/ingestion/ingest_line_item_data_products
+              - id: ad
+                value:
+                  type: script
+                  input_transforms: {}
+                  is_trigger: false
+                  path: f/test_case/ingest_dirty_line_item_data_products
+              - id: d
+                value:
+                  type: script
+                  input_transforms: {}
+                  is_trigger: false
+                  path: f/ingestion/ingest_line_item_data_prices
+              - id: m
+                value:
+                  type: script
+                  input_transforms: {}
+                  is_trigger: false
+                  path: f/ingestion/ingest_user_data
+            expr: 'false'
+            parallel: true
+            skip_failure: false
+          - summary: ''
+            modules:
+              - id: f
+                value:
+                  type: script
+                  input_transforms: {}
+                  is_trigger: false
+                  path: f/ingestion/ingest_order_data
+              - id: af
+                value:
+                  type: script
+                  input_transforms: {}
+                  is_trigger: false
+                  path: f/test_case/ingest_dirty_order_data
+              - id: j
+                value:
+                  type: script
+                  input_transforms:
+                    new_campaign_file:
+                      type: static
+                  is_trigger: false
+                  path: f/ingestion/ingest_campaign_data
+              - id: 'n'
+                value:
+                  type: script
+                  input_transforms: {}
+                  is_trigger: false
+                  path: f/ingestion/ingest_user_job
+            expr: 'false'
+            parallel: true
+            skip_failure: false
+          - summary: ''
+            modules:
+              - id: i
+                value:
+                  type: script
+                  input_transforms: {}
+                  is_trigger: false
+                  path: f/ingestion/ingest_order_with_merchant_data
+              - id: g
+                value:
+                  type: script
+                  input_transforms: {}
+                  is_trigger: false
+                  path: f/ingestion/ingest_order_delays
+            expr: 'false'
+            parallel: true
+            skip_failure: false
+        parallel: true
+    - id: s
+      value:
+        type: script
+        input_transforms: {}
+        is_trigger: false
+        path: f/clean/testing_cleaning_data_script
+    - id: u
+      summary: ''
+      value:
+        type: branchall
+        branches:
+          - summary: ''
+            modules:
+              - id: t
+                value:
+                  type: script
+                  input_transforms: {}
+                  is_trigger: false
+                  path: f/transformers/DIM_MERCHANT
+              - id: x
+                value:
+                  type: script
+                  input_transforms: {}
+                  is_trigger: false
+                  path: f/transformers/DIM_DATE
+            expr: 'false'
+            parallel: true
+            skip_failure: false
+          - summary: ''
+            modules:
+              - id: w
+                value:
+                  type: script
+                  input_transforms: {}
+                  is_trigger: false
+                  path: f/transformers/DIM_PRODUCT
+              - id: 'y'
+                value:
+                  type: script
+                  input_transforms: {}
+                  is_trigger: false
+                  path: f/transformers/DIM_STAFF
+            expr: 'false'
+            parallel: true
+            skip_failure: false
+          - summary: ''
+            modules:
+              - id: v
+                value:
+                  type: script
+                  input_transforms: {}
+                  is_trigger: false
+                  path: f/transformers/DIM_USER
+              - id: z
+                value:
+                  type: script
+                  input_transforms: {}
+                  is_trigger: false
+                  path: f/transformers/DIM_CAMPAIGN
+            expr: 'false'
+            parallel: true
+            skip_failure: false
+        parallel: true
+    - id: aa
+      value:
+        type: script
+        input_transforms: {}
+        is_trigger: false
+        path: f/transformers/FACT_ORDERS
+    - id: ac
+      value:
+        type: script
+        input_transforms: {}
+        is_trigger: false
+        path: f/transformers/FACT_ORDER_ITEMS
+    - id: ab
+      value:
+        type: script
+        input_transforms: {}
+        is_trigger: false
+        path: f/transformers/FACT_CAMPAIGN_PERFORMANCE
+schema:
+  $schema: 'https://json-schema.org/draft/2020-12/schema'
+  type: object
+  order: []
+  properties: {}
+  required: []

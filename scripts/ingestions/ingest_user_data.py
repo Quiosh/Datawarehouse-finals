@@ -6,7 +6,7 @@ from io import StringIO
 
 # 🔑 Replace this with the EXACT Raw URL for user_data.json from GitHub
 FILE_URL = (
-    "https://raw.githubusercontent.com/Quiosh/Datawarehouse-finals/main/datasets/Customer%20Management%20Department/user_data.json"
+    "https://raw.githubusercontent.com/Quiosh/dwh_finalproject_3cse_group_4/main/datasets/Customer%20Management%20Department/user_data.json"
 )
 
 

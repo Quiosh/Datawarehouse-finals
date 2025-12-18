@@ -23,7 +23,6 @@ URL_PROD_3 = (
     "datasets/Operations%20Department/line_item_data_products3.parquet"
 )
 
-
 def _load_csv_from_github(url: str) -> pd.DataFrame:
     resp = requests.get(url, timeout=60)
     resp.raise_for_status()

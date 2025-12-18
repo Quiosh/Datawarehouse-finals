@@ -4,6 +4,7 @@ import psycopg2
 from io import BytesIO, StringIO
 import openpyxl  # Required for pandas to read Excel files
 
+# 🔑 Replace with the EXACT Raw URL for product_list.xlsx from GitHub
 FILE_URL = (
     "https://raw.githubusercontent.com/Quiosh/dwh_finalproject_3cse_group_4/main/datasets/Business%20Department/product_list.xlsx"
 )

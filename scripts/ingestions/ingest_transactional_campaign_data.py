@@ -5,30 +5,30 @@ import pandas as pd
 import psycopg2
 from io import StringIO
 
-# 🔑 Raw URL
-FILE_URL = (
-    "https://raw.githubusercontent.com/Quiosh/Datawarehouse-finals/main/"
+# 🔗 RAW URL for Historical Data
+HISTORICAL_FILE_URL = (
+    "https://raw.githubusercontent.com/Quiosh/dwh_finalproject_3cse_group_4/main/"
     "datasets/Marketing%20Department/transactional_campaign_data.csv"
 )
 
 
-def main():
-    # 1) Download CSV from GitHub
-    resp = requests.get(FILE_URL, timeout=60)
+# ---------- helpers ----------
+
+def _get(url: str) -> requests.Response:
+    resp = requests.get(url, timeout=60)
     resp.raise_for_status()
+    return resp
 
-    # 2) Load into pandas
-    df = pd.read_csv(io.StringIO(resp.text))
-
-    # ==========================================
-    # 🧹 DATA CLEANING STEPS
-    # ==========================================
-
-    # 1. Drop Junk Columns (Unnamed: 0, Unnamed: 5, etc.)
-    df = df.loc[:, ~df.columns.str.contains('^Unnamed', case=False)]
+def _standardize_links_df(df: pd.DataFrame) -> pd.DataFrame:
+    """
+    Unified standardization for both historical and test data.
+    Enforces schema: transaction_date, campaign_id, order_id, estimated_arrival, availed
+    """
+    # 1. Drop junk columns like "Unnamed: 0"
+    df = df.loc[:, ~df.columns.str.contains("^Unnamed:", case=False)]
 
     # 2. Normalize Headers
-    #    "Campaign_id" -> "campaign_id"
+    #    Map the CSV headers (often Title Case) to DB columns (lowercase)
     rename_map = {}
     for col in df.columns:
         lc = str(col).strip().lower()
@@ -45,33 +45,52 @@ def main():
 
     df = df.rename(columns=rename_map)
 
-    # 3. Clean Estimated Arrival
-    #    "5days" -> 5 (Integer)
+    # 3. Ensure ALL Target Columns Exist
+    required_cols = ["transaction_date", "campaign_id", "order_id", "estimated_arrival", "availed"]
+    
+    for col in required_cols:
+        if col not in df.columns:
+            # Fill missing columns with None (NULL in Postgres)
+            df[col] = None
+
+    # 4. Clean specific columns
     if "estimated_arrival" in df.columns:
+        # Remove "days" text, keep numbers
         df["estimated_arrival"] = df["estimated_arrival"].astype(str).str.replace(r'\D', '', regex=True)
         df["estimated_arrival"] = pd.to_numeric(df["estimated_arrival"], errors="coerce")
 
-    # 4. Clean Transaction Date (Remove 00:00:00)
-    #    We convert to datetime, then format as string YYYY-MM-DD
     if "transaction_date" in df.columns:
-        df["transaction_date"] = pd.to_datetime(df["transaction_date"], errors="coerce").dt.date
+        # Ensure it is a valid date string
+        # Coerce errors to NaT, then drop NaT if necessary, or keep as None
+        df["transaction_date"] = pd.to_datetime(df["transaction_date"], errors="coerce")
 
-    # 5. Clean Availed
     if "availed" in df.columns:
+        # Ensure 1/0 integer
         df["availed"] = pd.to_numeric(df["availed"], errors="coerce").fillna(0).astype(int)
 
-    # 6. Safety Deduplication
-    df = df.drop_duplicates()
+    # 5. Clean IDs (Strip whitespace)
+    if "order_id" in df.columns:
+        df["order_id"] = df["order_id"].astype(str).str.strip()
+    if "campaign_id" in df.columns:
+        df["campaign_id"] = df["campaign_id"].astype(str).str.strip()
 
+    # Return only the columns needed, in the correct order
+    return df[required_cols]
+
+
+# ---------- main ----------
+
+def main(new_links_file: bytes = None):
     # ==========================================
+    # PART 1: LOAD HISTORICAL DATA
+    # ==========================================
+    print("⏳ Loading historical transactional campaign data...")
+    
+    # Download and Standardize
+    resp = _get(HISTORICAL_FILE_URL)
+    df_historical = _standardize_links_df(pd.read_csv(io.StringIO(resp.text)))
 
-    # Verify Columns
-    required_cols = ["transaction_date", "campaign_id", "order_id", "estimated_arrival", "availed"]
-    missing = [c for c in required_cols if c not in df.columns]
-    if missing:
-        raise ValueError(f"Missing expected columns {missing}. Got {list(df.columns)}")
-
-    # 4) Connect to Postgres
+    # Connect to Postgres
     conn = psycopg2.connect(
         host="db",
         port=5432,
@@ -81,14 +100,16 @@ def main():
     )
     cur = conn.cursor()
 
-    # 5) Drop & recreate staging table
     table_name = "stg_transactional_campaign_data"
-    cur.execute(f"DROP TABLE IF EXISTS {table_name};")
 
-    #    Note: transaction_date is now DATE (no time)
+    # Drop & Recreate Staging Table (Full Refresh for Historical)
+    print(f"🗑️ Recreating table {table_name}...")
+    cur.execute(f"DROP TABLE IF EXISTS {table_name};")
+    
+    # We create the table with specific types matching our cleaning logic
     cur.execute(f"""
         CREATE TABLE {table_name} (
-            transaction_date   DATE,
+            transaction_date   TIMESTAMP,
             campaign_id        TEXT,
             order_id           TEXT,
             estimated_arrival  INTEGER,
@@ -96,10 +117,10 @@ def main():
         );
     """)
 
-    # 6) Bulk insert using COPY
+    # Bulk insert Historical Data
+    print(f"📥 Inserting {len(df_historical)} historical rows...")
     buffer = StringIO()
-    cols_to_write = ["transaction_date", "campaign_id", "order_id", "estimated_arrival", "availed"]
-    df[cols_to_write].to_csv(buffer, index=False, header=False)
+    df_historical.to_csv(buffer, index=False, header=False)
     buffer.seek(0)
 
     cur.copy_expert(
@@ -115,14 +136,73 @@ def main():
         """,
         buffer,
     )
-
     conn.commit()
+
+    # ==========================================
+    # PART 2: LOAD NEW TEST DATA (APPEND MODE)
+    # ==========================================
+    print("🔎 Checking for new test data to append...")
+    df_new_links = pd.DataFrame()
+
+    # 1) Load Data (Upload OR URL Fallback)
+    if new_links_file:
+        print("📥 Processing uploaded links file...")
+        try:
+            file_stream = io.BytesIO(new_links_file)
+            df_new_links = _standardize_links_df(pd.read_csv(file_stream))
+            print(f"✅ Successfully loaded {len(df_new_links)} rows from upload.")
+        except Exception as e:
+            print(f"❌ Error reading uploaded file: {e}")
+            raise e
+    else:
+        # Fallback to URL
+        print(f"🌐 No upload provided. Checking default test file URL...")
+        try:
+            resp = _get(URL_LATE_LINKS_FILE)
+            df_new_links = _standardize_links_df(pd.read_csv(StringIO(resp.text)))
+            print(f"✅ Successfully loaded {len(df_new_links)} rows from URL.")
+        except Exception as e:
+            print(f"⚠️ Could not load from URL or no test data found: {e}")
+            pass
+
+    if not df_new_links.empty:
+        # 2) Bulk Insert (APPEND ONLY)
+        buffer = StringIO()
+        df_new_links.to_csv(buffer, index=False, header=False)
+        buffer.seek(0)
+
+        try:
+            cur.copy_expert(
+                f"""
+                COPY {table_name} (
+                    transaction_date, 
+                    campaign_id, 
+                    order_id, 
+                    estimated_arrival, 
+                    availed
+                )
+                FROM STDIN WITH (FORMAT csv)
+                """,
+                buffer,
+            )
+            conn.commit()
+            print(f"➕ Appended {len(df_new_links)} new rows to {table_name}.")
+            
+        except Exception as e:
+            conn.rollback()
+            print(f"❌ Database error during append: {e}")
+            raise e
+    
     cur.close()
     conn.close()
 
     return {
         "table": table_name,
-        "rows_loaded": len(df),
-        "source_url": FILE_URL,
-        "columns_final": cols_to_write
+        "historical_rows": len(df_historical),
+        "test_rows_appended": len(df_new_links),
+        "total_rows": len(df_historical) + len(df_new_links)
     }
+
+
+if __name__ == "__main__":
+    main()

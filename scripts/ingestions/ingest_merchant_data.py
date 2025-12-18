@@ -8,7 +8,7 @@ import lxml
 
 # 🔑 Replace with the EXACT Raw URL for merchant_data.html from GitHub
 FILE_URL = (
-    "https://raw.githubusercontent.com/Quiosh/Datawarehouse-finals/main/datasets/Enterprise%20Department/merchant_data.html"
+    "https://raw.githubusercontent.com/Quiosh/dwh_finalproject_3cse_group_4/main/datasets/Enterprise%20Department/merchant_data.html"
 )
 
 

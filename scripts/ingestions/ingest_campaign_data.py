@@ -5,51 +5,93 @@ import pandas as pd
 import psycopg2
 from io import StringIO
 
-# 🔑 Raw URL (This file is "dirty" and needs the cleaning logic below)
-FILE_URL = "https://raw.githubusercontent.com/Quiosh/Datawarehouse-finals/main/datasets/Marketing%20Department/campaign_data.csv"
+# 🔗 RAW URL for Historical Data (The "Messy" Tab-Separated File)
+HISTORICAL_FILE_URL = (
+    "https://raw.githubusercontent.com/Quiosh/dwh_finalproject_3cse_group_4/main/"
+    "datasets/Marketing%20Department/campaign_data.csv"
+)
 
 
-def main():
-    # 1) Download CSV from GitHub
-    resp = requests.get(FILE_URL, timeout=30)
+# ---------- helpers ----------
+
+def _get(url: str) -> requests.Response:
+    resp = requests.get(url, timeout=60)
     resp.raise_for_status()
+    return resp
 
-    # 2) Read Raw File
-    #    The GitHub file is technically a CSV, but all the data is stuffed 
-    #    into the first column, separated by tabs.
-    df_raw = pd.read_csv(io.StringIO(resp.text))
+def _standardize_campaign_df(df: pd.DataFrame, source_type: str = 'clean') -> pd.DataFrame:
+    """
+    Unified standardization.
+    Args:
+        source_type: 'dirty_historical' (for the tab-separated file) or 'clean' (for standard CSV)
+    """
+    
+    # 1. Handle "Dirty" Historical Format
+    if source_type == 'dirty_historical':
+        # The historical file is tab-separated stuffed into column 0
+        df = df.iloc[:, 0].str.split('\t', expand=True)
+        
+        # Drop the junk index column (Column 0) if it exists
+        if df.shape[1] >= 5:
+            df = df.drop(columns=[0])
+            
+        # Manually assign headers since the dirty file doesn't have them in a usable way
+        if df.shape[1] == 4:
+            df.columns = ["campaign_id", "campaign_name", "campaign_description", "discount"]
+            
+    else:
+        # 2. Handle "Clean" Test/Upload Format
+        # Normalize headers
+        df = df.rename(columns={
+            "Campaign_id": "campaign_id", 
+            "Campaign_name": "campaign_name", 
+            "Description": "campaign_description", 
+            "Discount": "discount",
+            # Lowercase fallbacks
+            "campaign_id": "campaign_id",
+            "campaign_name": "campaign_name",
+            "description": "campaign_description",
+            "discount": "discount"
+        })
 
+    # 3. Ensure Schema & Fill Missing
+    required_cols = ["campaign_id", "campaign_name", "campaign_description", "discount"]
+    for col in required_cols:
+        if col not in df.columns:
+            df[col] = None
+    df = df[required_cols]
+
+    # 4. Common Cleaning: "discount"
+    #    Remove '%' or letters, keep numbers/dots.
+    if "discount" in df.columns:
+        df["discount"] = df["discount"].astype(str).str.replace(r'[^0-9.]', '', regex=True)
+        df["discount"] = pd.to_numeric(df["discount"], errors='coerce')
+
+    # 5. Common Cleaning: "campaign_description"
+    #    Remove excessive quotes often found in raw files
+    if "campaign_description" in df.columns:
+        df["campaign_description"] = df["campaign_description"].astype(str).str.replace('"', '')
+
+    return df
+
+
+# ---------- main ----------
+
+def main(new_campaign_file: bytes = None):
     # ==========================================
-    # 🧹 DATA CLEANING STEPS
+    # PART 1: LOAD HISTORICAL DATA
     # ==========================================
+    print("⏳ Loading historical campaign data...")
+    
+    # Download raw text
+    resp = _get(HISTORICAL_FILE_URL)
+    # Parse as 'dirty_historical' because we know this specific URL is the messy one
+    df_historical = _standardize_campaign_df(
+        pd.read_csv(io.StringIO(resp.text)), 
+        source_type='dirty_historical'
+    )
 
-    # 1. Extract Hidden Data
-    #    Split the first column by Tab ('\t') to get the real data columns.
-    #    This creates columns: [Index, ID, Name, Description, Discount]
-    df = df_raw.iloc[:, 0].str.split('\t', expand=True)
-
-    # 2. Drop Junk Index Column (Column 0)
-    #    The first extracted column is just row numbers (0, 1, 2...). We remove it.
-    if df.shape[1] >= 5:
-        df = df.drop(columns=[0])
-
-    # 3. Assign Correct Headers
-    df.columns = ["campaign_id", "campaign_name", "campaign_description", "discount"]
-
-    # 4. Clean "discount" Column
-    #    Converts '1%', '10%%', '1pct' -> 1, 10, 1
-    #    Regex removes anything that is NOT a digit or dot.
-    df["discount"] = df["discount"].astype(str).str.replace(r'[^0-9.]', '', regex=True)
-    #    Safely convert to number (coercing errors to NaN)
-    df["discount"] = pd.to_numeric(df["discount"], errors='coerce')
-
-    # 5. Clean "campaign_description"
-    #    Removes the excessive triple-quotes ("""Text""") found in the raw data.
-    df["campaign_description"] = df["campaign_description"].astype(str).str.replace('"', '')
-
-    # ==========================================
-
-    # 4) Connect to Postgres
+    # Connect to Postgres
     conn = psycopg2.connect(
         host="db",
         port=5432,
@@ -59,27 +101,30 @@ def main():
     )
     cur = conn.cursor()
 
-    # 5) Recreate Staging Table
-    cur.execute("DROP TABLE IF EXISTS stg_campaign_data;")
+    table_name = "stg_campaign_data"
+
+    # Drop & Recreate Staging Table (Full Refresh for Historical)
+    print(f"🗑️ Recreating table {table_name}...")
+    cur.execute(f"DROP TABLE IF EXISTS {table_name};")
     
-    cur.execute("""
-        CREATE TABLE stg_campaign_data (
-            campaign_id           TEXT,
-            campaign_name         TEXT,
-            campaign_description  TEXT,
-            discount              NUMERIC
+    cur.execute(f"""
+        CREATE TABLE {table_name} (
+            campaign_id          TEXT,
+            campaign_name        TEXT,
+            campaign_description TEXT,
+            discount             NUMERIC
         );
     """)
 
-    # 6) Bulk insert using COPY
+    # Bulk insert Historical Data
+    print(f"📥 Inserting {len(df_historical)} historical rows...")
     buffer = StringIO()
-    # Write to buffer as standard CSV (comma separated)
-    df.to_csv(buffer, index=False, header=False)
+    df_historical.to_csv(buffer, index=False, header=False)
     buffer.seek(0)
 
     cur.copy_expert(
-        """
-        COPY stg_campaign_data (
+        f"""
+        COPY {table_name} (
             campaign_id, 
             campaign_name, 
             campaign_description, 
@@ -89,13 +134,74 @@ def main():
         """,
         buffer,
     )
-
     conn.commit()
+
+    # ==========================================
+    # PART 2: LOAD NEW TEST DATA (APPEND MODE)
+    # ==========================================
+    print("🔎 Checking for new test data to append...")
+    df_new_campaigns = pd.DataFrame()
+
+    # 1) Load Data (Upload OR URL Fallback)
+    if new_campaign_file:
+        print("📥 Processing manually uploaded campaign file...")
+        try:
+            file_stream = io.BytesIO(new_campaign_file)
+            # We assume uploads are standard CSVs ('clean')
+            df_new_campaigns = _standardize_campaign_df(pd.read_csv(file_stream), source_type='clean')
+            print(f"✅ Successfully loaded {len(df_new_campaigns)} rows from upload.")
+        except Exception as e:
+            print(f"❌ Error reading uploaded file: {e}")
+            raise e
+    else:
+        # Fallback to URL
+        print(f"🌐 No upload provided. Checking default test file URL...")
+        try:
+            resp = _get(URL_LATE_CAMPAIGN_FILE)
+            # We assume the test file is a standard CSV ('clean')
+            df_new_campaigns = _standardize_campaign_df(pd.read_csv(StringIO(resp.text)), source_type='clean')
+            print(f"✅ Successfully loaded {len(df_new_campaigns)} rows from URL.")
+        except Exception as e:
+            print(f"⚠️ Could not load from URL or no test data found: {e}")
+            pass
+
+    if not df_new_campaigns.empty:
+        # 2) Bulk Insert (APPEND ONLY)
+        buffer = StringIO()
+        df_new_campaigns.to_csv(buffer, index=False, header=False)
+        buffer.seek(0)
+
+        try:
+            cur.copy_expert(
+                f"""
+                COPY {table_name} (
+                    campaign_id, 
+                    campaign_name, 
+                    campaign_description, 
+                    discount
+                )
+                FROM STDIN WITH (FORMAT csv)
+                """,
+                buffer,
+            )
+            conn.commit()
+            print(f"➕ Appended {len(df_new_campaigns)} new rows to {table_name}.")
+            
+        except Exception as e:
+            conn.rollback()
+            print(f"❌ Database error during append: {e}")
+            raise e
+    
     cur.close()
     conn.close()
 
     return {
-        "rows_loaded": len(df),
-        "source_url": FILE_URL,
-        "columns_cleaned": list(df.columns)
+        "table": table_name,
+        "historical_rows": len(df_historical),
+        "test_rows_appended": len(df_new_campaigns),
+        "total_rows": len(df_historical) + len(df_new_campaigns)
     }
+
+
+if __name__ == "__main__":
+    main()

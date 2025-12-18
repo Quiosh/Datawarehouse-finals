@@ -5,59 +5,29 @@ from io import BytesIO, StringIO
 
 # 🔑 Replace with the EXACT Raw URL for user_credit_card.pickle from GitHub
 FILE_URL = (
-    "https://raw.githubusercontent.com/Quiosh/Datawarehouse-finals/main/datasets/Customer%20Management%20Department/user_credit_card.pickle"
+    "https://raw.githubusercontent.com/Quiosh/dwh_finalproject_3cse_group_4/main/datasets/Customer%20Management%20Department/user_credit_card.pickle"
 )
 
 
 def main():
     # 1) Download pickle from GitHub
     resp = requests.get(FILE_URL, timeout=30)
-    resp.raise_for_status()
+    resp.raise_for_status()  # raise if 404/500
 
     # 2) Load pickled DataFrame from bytes
-    #    If the file on GitHub is a pickle, this works.
-    try:
-        df = pd.read_pickle(BytesIO(resp.content))
-    except Exception:
-        # Fallback: If it's actually a CSV disguised as a pickle (rare but possible)
-        try:
-            df = pd.read_csv(BytesIO(resp.content))
-        except Exception as e:
-            raise ValueError(f"Failed to load file. Error: {e}")
+    df = pd.read_pickle(BytesIO(resp.content))
 
-    # ==========================================
-    # 🧹 DATA CLEANING STEPS
-    # ==========================================
-
-    # 1. Standardize Headers
-    #    "User_id" -> "user_id"
-    df.columns = df.columns.str.lower().str.strip()
-
-    # 2. Drop Junk Columns (Unnamed: 4, etc.)
-    df = df.loc[:, ~df.columns.str.contains('^unnamed', case=False)]
-
-    # 3. Clean Credit Card Number
-    #    Ensure it is a string (safe for DB, prevents scientific notation)
-    if "credit_card_number" in df.columns:
-        df["credit_card_number"] = df["credit_card_number"].astype(str).str.strip()
-        # Remove '.0' if it was loaded as a float
-        df["credit_card_number"] = df["credit_card_number"].str.replace(r'\.0$', '', regex=True)
-
-    # 4. Safety Deduplication
-    df = df.drop_duplicates()
-
-    # ==========================================
-
-    # Expected columns check
+    # Expected columns based on the pickle:
+    # user_id, name, credit_card_number, issuing_bank
     required_cols = ["user_id", "name", "credit_card_number", "issuing_bank"]
     missing = [c for c in required_cols if c not in df.columns]
     if missing:
-        raise ValueError(
-            f"Missing expected columns: {missing}. "
-            f"Available columns: {list(df.columns)}"
-        )
+        raise ValueError(f"Missing expected columns in pickle: {missing}")
 
-    # 3) Connect directly to Postgres
+    # Optional: ensure credit card number is a string (safer than int)
+    df["credit_card_number"] = df["credit_card_number"].astype(str)
+
+    # 3) Connect directly to Postgres container "db"
     conn = psycopg2.connect(
         host="db",
         port=5432,
@@ -67,7 +37,7 @@ def main():
     )
     cur = conn.cursor()
 
-    # 4) Create / Reset Staging Table
+    # 4) Create / reset staging table
     cur.execute("""
         CREATE TABLE IF NOT EXISTS stg_user_credit_card (
             user_id             TEXT,
@@ -103,5 +73,4 @@ def main():
     return {
         "rows_loaded": len(df),
         "source_url": FILE_URL,
-        "columns_found": list(df.columns)
     }

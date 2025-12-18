@@ -5,6 +5,7 @@ logging.basicConfig(
     level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s"
 )
 
+
 def main():
     conn = psycopg2.connect(
         host="db",
@@ -46,15 +47,16 @@ def main():
 
         count = cur.rowcount
         conn.commit()
-        logging.info(f"DIM_PRODUCT refreshed. Loaded {count} rows.")
+        logging.info(f"✅ DIM_PRODUCT refreshed. Loaded {count} rows.")
 
     except Exception as e:
         conn.rollback()
-        logging.error(f"DIM_PRODUCT failed: {e}")
+        logging.error(f"❌ DIM_PRODUCT failed: {e}")
         raise
     finally:
         cur.close()
         conn.close()
+
 
 if __name__ == "__main__":
     main()
