@@ -237,7 +237,7 @@ def main():
     cur.execute(
         f"""
         CREATE TABLE {table_name} (
-            order_id           TEXT,
+            order_id           TEXT UNIQUE,
             user_id            TEXT,
             estimated_arrival  INTEGER,
             transaction_date   TIMESTAMP
