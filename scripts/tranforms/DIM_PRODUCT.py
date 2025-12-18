@@ -5,7 +5,6 @@ logging.basicConfig(
     level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s"
 )
 
-
 def main():
     conn = psycopg2.connect(
         host="db",
@@ -29,6 +28,11 @@ def main():
             );
         """)
 
+        # --- REFRESH STEP: Clear the table first ---
+        logging.info("Truncating DIM_PRODUCT table...")
+        cur.execute("TRUNCATE TABLE dim_product CASCADE;")
+        # -------------------------------------------
+
         logging.info("Loading products...")
         cur.execute("""
             INSERT INTO dim_product (product_id, product_name, product_type, base_price)
@@ -37,19 +41,16 @@ def main():
                 product_name,
                 product_type,
                 price
-            FROM stg_product_list s
-            WHERE NOT EXISTS (
-                SELECT 1 FROM dim_product d WHERE d.product_id = s.product_id
-            );
+            FROM stg_product_list;
         """)
 
         count = cur.rowcount
         conn.commit()
-        logging.info(f" DIM_PRODUCT loaded. Inserted {count} new products.")
+        logging.info(f"DIM_PRODUCT refreshed. Loaded {count} rows.")
 
     except Exception as e:
         conn.rollback()
-        logging.error(f" DIM_PRODUCT failed: {e}")
+        logging.error(f"DIM_PRODUCT failed: {e}")
         raise
     finally:
         cur.close()

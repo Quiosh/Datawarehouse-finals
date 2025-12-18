@@ -5,7 +5,6 @@ logging.basicConfig(
     level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s"
 )
 
-
 def main():
     conn = psycopg2.connect(
         host="db",
@@ -29,7 +28,13 @@ def main():
             );
         """)
 
-        logging.info("Loading new campaigns...")
+        # --- REFRESH STEP: Clear the table first ---
+        logging.info("Truncating DIM_CAMPAIGN table...")
+        cur.execute("TRUNCATE TABLE dim_campaign CASCADE;")
+        # -------------------------------------------
+
+        logging.info("Loading campaigns...")
+        # Since table is empty, we don't need 'WHERE NOT EXISTS' anymore
         cur.execute("""
             INSERT INTO dim_campaign (campaign_id, campaign_name, description, discount)
             SELECT DISTINCT
@@ -37,19 +42,16 @@ def main():
                 campaign_name,
                 campaign_description,
                 discount
-            FROM stg_campaign_data s
-            WHERE NOT EXISTS (
-                SELECT 1 FROM dim_campaign d WHERE d.campaign_id = s.campaign_id
-            );
+            FROM stg_campaign_data;
         """)
 
         inserted_count = cur.rowcount
         conn.commit()
-        logging.info(f" DIM_CAMPAIGN loaded. Inserted {inserted_count} new rows.")
+        logging.info(f"DIM_CAMPAIGN refreshed. Loaded {inserted_count} rows.")
 
     except Exception as e:
         conn.rollback()
-        logging.error(f" DIM_CAMPAIGN failed: {e}")
+        logging.error(f"DIM_CAMPAIGN failed: {e}")
         raise
     finally:
         cur.close()
